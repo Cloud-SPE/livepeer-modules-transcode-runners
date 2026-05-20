@@ -47,8 +47,10 @@ import socket
 import sys
 import time
 import os
+from pathlib import Path
 
 input_url = ""
+output_template = ""
 args = sys.argv[1:]
 idx = 0
 while idx < len(args):
@@ -57,6 +59,9 @@ while idx < len(args):
         idx += 2
         continue
     idx += 1
+
+if args:
+    output_template = args[-1]
 
 if "://" in input_url:
     port = input_url.split("://", 1)[1].split(":", 1)[1].split("/", 1)[0]
@@ -74,6 +79,13 @@ else:
             os.read(f.fileno(), 64)
         except Exception:
             pass
+        if output_template:
+            base_dir = Path(output_template).parent.parent
+            variant_dir = base_dir / "v0"
+            variant_dir.mkdir(parents=True, exist_ok=True)
+            (base_dir / "master.m3u8").write_text("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nv0/playlist.m3u8\n")
+            (variant_dir / "playlist.m3u8").write_text("#EXTM3U\n#EXTINF:2.0,\nsegment_000000.ts\n")
+            (variant_dir / "segment_000000.ts").write_bytes(b"segment-data")
         time.sleep(60)
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
@@ -483,6 +495,90 @@ func TestSharedIngestRejectsUnknownStreamKey(t *testing.T) {
 	}
 	if got.Ingest.Authenticated || got.Ingest.ConnectedPublisher {
 		t.Fatalf("unexpected ingest auth state after rejection: %+v", got.Ingest)
+	}
+	rt.stop("test_done")
+}
+
+func TestGatewayIngestEndToEndPublishesAndUploadsHLS(t *testing.T) {
+	s3 := newFakeS3Server()
+	defer s3.close()
+
+	s := newTestServer(t)
+	s.cfg.OutputSyncInterval = 50 * time.Millisecond
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	shared, err := startSharedIngest(s.store, s.metrics, addr)
+	if err != nil {
+		t.Fatalf("start shared ingest: %v", err)
+	}
+	defer shared.Close()
+	s.cfg.IngestPublicHost = "127.0.0.1"
+	s.cfg.SharedIngestAddr = addr
+
+	body := liveSessionRequest{
+		BrokerSessionID: "bsess_e2e",
+		WorkID:          "work_e2e",
+		CapabilityID:    "livepeer:transcode/live-gateway-ingest",
+		OfferingID:      "default",
+		SessionParams:   liveSessionParams{Name: "e2e"},
+		OutputCredential: &s3OutputCredential{
+			Endpoint:        s3.server.URL,
+			Region:          "us-east-1",
+			Bucket:          "bucket",
+			KeyPrefix:       "live-out/a/e2e/",
+			AccessKeyID:     "AKIA_TEST",
+			SecretAccessKey: "secret",
+			SessionToken:    "token",
+			ExpiresAt:       "2026-05-20T22:10:00Z",
+		},
+		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_e2e"},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/video/live/sessions", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out createSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	rt := s.store.get(out.RunnerSessionID)
+	if rt == nil {
+		t.Fatal("session missing from store")
+	}
+
+	if err := publishViaSharedIngress(addr, rt.rec.StreamKey); err != nil {
+		t.Fatalf("publish via shared ingress: %v", err)
+	}
+
+	waitForCondition(t, 3*time.Second, func() bool {
+		got := rt.query()
+		return got.State == statePublishing && got.Ingest.Authenticated && got.Ingest.ConnectedPublisher
+	})
+	waitForCondition(t, 3*time.Second, func() bool {
+		files := s3.snapshot()
+		_, master := files["bucket/live-out/a/e2e/master.m3u8"]
+		_, playlist := files["bucket/live-out/a/e2e/v0/playlist.m3u8"]
+		_, segment := files["bucket/live-out/a/e2e/v0/segment_000000.ts"]
+		return master && playlist && segment
+	})
+
+	got := rt.query()
+	if got.Output.PutSuccessCount < 3 {
+		t.Fatalf("put success count=%d", got.Output.PutSuccessCount)
+	}
+	if got.Output.LastManifestPutAt == nil {
+		t.Fatal("expected manifest upload timestamp")
+	}
+	if got.Output.LastSegmentPutAt == nil {
+		t.Fatal("expected segment upload timestamp")
 	}
 	rt.stop("test_done")
 }
