@@ -9,14 +9,12 @@ import (
 type sessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*sessionRuntime
-	ports    map[int]string
 	streams  map[string]string
 }
 
 func newSessionStore() *sessionStore {
 	return &sessionStore{
 		sessions: make(map[string]*sessionRuntime),
-		ports:    make(map[int]string),
 		streams:  make(map[string]string),
 	}
 }
@@ -27,11 +25,7 @@ func (s *sessionStore) add(rt *sessionRuntime) error {
 	if _, exists := s.sessions[rt.rec.RunnerSessionID]; exists {
 		return errors.New("session already exists")
 	}
-	if owner, used := s.ports[rt.rec.RTMPPort]; used && owner != rt.rec.RunnerSessionID {
-		return errors.New("rtmp port already assigned")
-	}
 	s.sessions[rt.rec.RunnerSessionID] = rt
-	s.ports[rt.rec.RTMPPort] = rt.rec.RunnerSessionID
 	if rt.rec.StreamKey != "" {
 		s.streams[rt.rec.StreamKey] = rt.rec.RunnerSessionID
 	}
@@ -48,7 +42,6 @@ func (s *sessionStore) delete(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if rt, ok := s.sessions[id]; ok {
-		delete(s.ports, rt.rec.RTMPPort)
 		delete(s.streams, rt.rec.StreamKey)
 		delete(s.sessions, id)
 	}
@@ -62,17 +55,6 @@ func (s *sessionStore) byStreamKey(streamKey string) *sessionRuntime {
 		return nil
 	}
 	return s.sessions[id]
-}
-
-func (s *sessionStore) nextPort(start, end int) (int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for p := start; p <= end; p++ {
-		if _, used := s.ports[p]; !used {
-			return p, nil
-		}
-	}
-	return 0, errors.New("no rtmp ports available")
 }
 
 func (s *sessionStore) snapshot() []*sessionRuntime {

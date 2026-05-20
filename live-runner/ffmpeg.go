@@ -29,26 +29,18 @@ func buildRuntimePlan(cfg config, rec sessionRecord, hw transcode.HWProfile) (bu
 		}
 	}
 
-	inputURL := ""
-	if rec.Mode == modeGatewayIngest {
-		if err := os.RemoveAll(rec.IngestPipePath); err != nil {
-			return buildRuntime{}, err
-		}
-		if err := syscall.Mkfifo(rec.IngestPipePath, 0o644); err != nil {
-			return buildRuntime{}, err
-		}
-		inputURL = rec.IngestPipePath
-	} else {
-		listenHost := cfg.RTMPListenHost
-		listenURL := fmt.Sprintf("rtmp://%s:%d/live/%s", listenHost, rec.RTMPPort, rec.StreamKey)
-		inputURL = listenURL
+	if err := os.RemoveAll(rec.IngestPipePath); err != nil {
+		return buildRuntime{}, err
 	}
-	args := buildLiveFFmpegArgs(inputURL, rec.Mode, rec.OutputDir, rec.Preset, hw, cfg.HLSWindowSegments)
+	if err := syscall.Mkfifo(rec.IngestPipePath, 0o644); err != nil {
+		return buildRuntime{}, err
+	}
+	inputURL := rec.IngestPipePath
+	args := buildLiveFFmpegArgs(inputURL, rec.OutputDir, rec.Preset, hw, cfg.HLSWindowSegments)
 	return buildRuntime{
 		Args:      args,
 		ListenURL: inputURL,
 		OutputDir: rec.OutputDir,
-		MasterURL: rec.HLSURL,
 		UsageUnit: "output_seconds",
 		CreatedAt: time.Now().UTC(),
 	}, nil
@@ -124,16 +116,7 @@ func startFFmpeg(rt *sessionRuntime, plan buildRuntime, hw transcode.HWProfile) 
 		rt.event("session.ended", rt.lastUsageTotal.Load(), 0, "completed", nil)
 	}()
 
-	if rt.rec.Mode == modeLocalHLSServe {
-		if err := waitForRTMPReady(rt.cfg, rt.rec.RTMPPort, rt.cfg.SessionReadyTimeout); err != nil {
-			cancel()
-			<-rt.ffmpegDone
-			return err
-		}
-		rt.setListenerBound(true)
-	} else {
-		rt.setListenerBound(true)
-	}
+	rt.setListenerBound(true)
 	return nil
 }
 
@@ -239,16 +222,13 @@ func (t *logTail) join() string {
 	return strings.Join(ordered, " | ")
 }
 
-func buildLiveFFmpegArgs(inputURL string, mode sessionMode, outputDir string, preset transcode.ABRPreset, hw transcode.HWProfile, window int) []string {
+func buildLiveFFmpegArgs(inputURL string, outputDir string, preset transcode.ABRPreset, hw transcode.HWProfile, window int) []string {
 	args := []string{
 		"-y",
 		"-fflags", "+nobuffer",
 		"-flags", "+low_delay",
-	}
-	if mode == modeLocalHLSServe {
-		args = append(args, "-listen", "1", "-i", inputURL)
-	} else {
-		args = append(args, "-f", "flv", "-i", inputURL)
+		"-f", "flv",
+		"-i", inputURL,
 	}
 
 	videoCount := 0

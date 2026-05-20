@@ -27,18 +27,13 @@
 ## live-runner
 
 - `POST /v1/video/live/sessions`
-  - creates a live runner session
-  - local-HLS mode response includes `runner_session_id`, `rtmp_url`,
-    `stream_key`, and `hls_url`
-  - gateway-ingest mode response includes `runner_session_id` and
-    `private_ingest_url`
+  - creates a gateway-ingest live runner session
+  - response includes `runner_session_id` and `private_ingest_url`
 - `GET /v1/video/live/sessions/{runner_session_id}`
   - returns current runner session state, ingest/output health, and cumulative
     usage
 - `DELETE /v1/video/live/sessions/{runner_session_id}`
   - terminates a live session
-- `GET /_hls/{runner_session_id}/master.m3u8`
-  - serves the session master playlist in local-HLS mode
 - `GET /healthz`
 
 ### Gateway-ingest mode request fields
@@ -51,13 +46,11 @@
 - `ingest_accept.stream_key`
   - stream key the shared RTMP ingress must accept
 
-When `output_credential` is present, the runner:
+The runner requires these fields and:
 
-- switches to gateway-ingest mode
 - returns `private_ingest_url`
-- omits `hls_url`
-- uploads HLS playlists and segments to the provided object store instead of
-  serving playback from local HTTP
+- uploads HLS playlists and segments to the provided object store
+- does not serve playback from local HTTP
 
 ## Notes
 

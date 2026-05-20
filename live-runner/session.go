@@ -35,24 +35,18 @@ type sessionRuntime struct {
 	uploadFailed    atomic.Bool
 }
 
-func newSessionRuntime(cfg config, req liveSessionRequest, preset transcodePreset, port int, callbacks *callbackClient, metrics *runnerMetrics) (*sessionRuntime, error) {
+func newSessionRuntime(cfg config, req liveSessionRequest, preset transcodePreset, callbacks *callbackClient, metrics *runnerMetrics) (*sessionRuntime, error) {
 	sessionID, err := randomID("rsess_")
 	if err != nil {
 		return nil, err
 	}
-	streamKey, err := randomStreamKey()
-	if err != nil {
-		return nil, err
+	if req.OutputCredential == nil {
+		return nil, errors.New("output_credential is required")
 	}
-
-	mode := modeLocalHLSServe
-	if req.OutputCredential != nil {
-		mode = modeGatewayIngest
-		if req.IngestAccept == nil || strings.TrimSpace(req.IngestAccept.StreamKey) == "" {
-			return nil, errors.New("ingest_accept.stream_key is required when output_credential is present")
-		}
-		streamKey = strings.TrimSpace(req.IngestAccept.StreamKey)
+	if req.IngestAccept == nil || strings.TrimSpace(req.IngestAccept.StreamKey) == "" {
+		return nil, errors.New("ingest_accept.stream_key is required")
 	}
+	streamKey := strings.TrimSpace(req.IngestAccept.StreamKey)
 
 	rec := sessionRecord{
 		RunnerSessionID:  sessionID,
@@ -62,8 +56,7 @@ func newSessionRuntime(cfg config, req liveSessionRequest, preset transcodePrese
 		OfferingID:       req.OfferingID,
 		Name:             req.SessionParams.Name,
 		State:            stateProvisioning,
-		Mode:             mode,
-		RTMPPort:         port,
+		Mode:             modeGatewayIngest,
 		CreatedAt:        time.Now().UTC(),
 		StreamKey:        streamKey,
 		Callbacks:        req.BrokerCallbacks,
@@ -71,29 +64,20 @@ func newSessionRuntime(cfg config, req liveSessionRequest, preset transcodePrese
 		Preset:           preset.ABRPreset,
 		OutputCredential: req.OutputCredential,
 		Ingest: liveIngestStatus{
-			Mode:            mode,
+			Mode:            modeGatewayIngest,
 			StreamKeySuffix: maskSecretSuffix(streamKey),
 		},
 		Output: liveOutputStatus{
-			Mode: outputModeLocalHLS,
+			Mode: outputModeS3Push,
 		},
 	}
-	if mode == modeGatewayIngest {
-		rec.Output.Mode = outputModeS3Push
-		rec.Output.TargetPrefix = req.OutputCredential.KeyPrefix
-	}
+	rec.Output.TargetPrefix = req.OutputCredential.KeyPrefix
 	if req.SessionParams.IdleTimeoutSeconds > 0 {
 		rec.IdleTimeout = time.Duration(req.SessionParams.IdleTimeoutSeconds) * time.Second
 	}
-	rec.RTMPURL = "rtmp://" + cfg.RTMPHost + ":" + itoa(port) + "/live"
 	rec.PrivateIngestURL = "rtmp://" + cfg.IngestPublicHost + ":" + cfg.sharedIngestPort() + "/live/" + streamKey
 	rec.OutputDir = cfg.TempDir + "/" + sessionID
-	if mode == modeGatewayIngest {
-		rec.IngestPipePath = rec.OutputDir + "/ingest.flv"
-	}
-	if mode == modeLocalHLSServe {
-		rec.HLSURL = cfg.HLSBasePath + "/" + sessionID + "/master.m3u8"
-	}
+	rec.IngestPipePath = rec.OutputDir + "/ingest.flv"
 
 	return &sessionRuntime{
 		rec:       rec,

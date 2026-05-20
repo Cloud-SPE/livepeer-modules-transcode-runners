@@ -53,18 +53,16 @@ and
 The live runner uses [`infra/presets/live.yaml`](./infra/presets/live.yaml) by
 default.
 
-## Live runner modes
+## Live runner mode
 
-`live-runner` now supports two session shapes behind the same control API:
+`live-runner` uses a single gateway-ingest shape:
 
-- local-HLS mode: per-session RTMP ingest on an allocated port range and local
-  HLS serving from `/_hls/...`
-- gateway-ingest mode: shared RTMP ingest on one port, direct FFmpeg ingest
-  through a local FIFO, and HLS upload to caller-supplied S3-compatible
-  storage
+- shared RTMP ingest on one port
+- direct FFmpeg ingest through a local FIFO
+- HLS upload to caller-supplied S3-compatible storage
 
-Gateway-ingest mode is selected per session when the broker includes
-`output_credential` and `ingest_accept.stream_key` in the session-open request.
+The broker must include `output_credential` and `ingest_accept.stream_key` in
+the session-open request.
 
 ## Repo layout
 

@@ -56,7 +56,6 @@ func newServer(cfg config) (*server, error) {
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
-	mux.Handle("GET "+s.cfg.HLSBasePath+"/", hlsHandler(s.cfg.TempDir, s.cfg.HLSBasePath))
 	mux.HandleFunc("POST /v1/video/live/sessions", s.auth(s.handleCreate))
 	mux.HandleFunc("GET /v1/video/live/sessions/{id}", s.auth(s.handleGet))
 	mux.HandleFunc("DELETE /v1/video/live/sessions/{id}", s.auth(s.handleDelete))
@@ -115,14 +114,9 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	port, err := s.store.nextPort(s.cfg.RTMPPortStart, s.cfg.RTMPPortEnd)
+	rt, err := newSessionRuntime(s.cfg, req, preset, s.callbacks, s.metrics)
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
-		return
-	}
-	rt, err := newSessionRuntime(s.cfg, req, preset, port, s.callbacks, s.metrics)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	plan, err := buildRuntimePlan(s.cfg, rt.rec, s.hw)
@@ -154,11 +148,6 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		State:            rt.rec.State,
 		PrivateIngestURL: rt.rec.PrivateIngestURL,
 		CreatedAt:        rt.rec.CreatedAt.Format(time.RFC3339),
-	}
-	if rt.rec.Mode == modeLocalHLSServe {
-		resp.Media.Ingest.RTMPURL = rt.rec.RTMPURL
-		resp.Media.Ingest.StreamKey = rt.rec.StreamKey
-		resp.Media.Playback.HLSURL = s.publicHLSURL(r, rt.rec.HLSURL)
 	}
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -249,11 +238,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
-}
-
-func (s *server) publicHLSURL(r *http.Request, path string) string {
-	scheme := s.cfg.publicURLScheme(r.Header.Get("X-Forwarded-Proto"))
-	return scheme + "://" + s.cfg.PublicHost + path
 }
 
 func (s *server) run(ctx context.Context) error {

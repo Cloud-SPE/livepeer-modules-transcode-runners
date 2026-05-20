@@ -31,9 +31,7 @@ The broker or any compatible upstream submits a job over HTTP. The runner:
 For `live-runner`, the shape is session-oriented instead:
 
 1. broker creates a runner session over HTTP
-2. runner selects one of two ingest modes:
-   - per-session RTMP listener + local HLS serve
-   - shared RTMP ingest + S3 push
+2. runner accepts gateway-owned RTMP on one shared ingest port
 3. runner starts an FFmpeg live HLS runtime
 4. publisher or gateway pushes RTMP into the runner ingest plane
 5. runner emits heartbeat, publish, upload, and usage events back to the broker
@@ -57,10 +55,9 @@ Each runner image then adds only:
 - a non-root runtime user
 
 `live-runner` keeps session state in memory and per-session scratch on local
-disk. In local-HLS mode it serves HLS from local scratch; in gateway-ingest
-mode it uploads HLS artifacts to caller-supplied S3-compatible storage. It
-remains blind to customer identity and billing state; the broker is still the
-payment and session authority.
+disk. It uploads HLS artifacts to caller-supplied S3-compatible storage and
+does not serve playback itself. It remains blind to customer identity and
+billing state; the broker is still the payment and session authority.
 
 ## Clean-slate constraints
 

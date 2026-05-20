@@ -57,25 +57,10 @@ type liveIngestAcceptance struct {
 	StreamKey string `json:"stream_key"`
 }
 
-type ingestMediaResponse struct {
-	RTMPURL   string `json:"rtmp_url,omitempty"`
-	StreamKey string `json:"stream_key,omitempty"`
-}
-
-type playbackMediaResponse struct {
-	HLSURL string `json:"hls_url,omitempty"`
-}
-
-type mediaResponse struct {
-	Ingest   ingestMediaResponse   `json:"ingest,omitempty"`
-	Playback playbackMediaResponse `json:"playback,omitempty"`
-}
-
 type createSessionResponse struct {
 	RunnerSessionID  string        `json:"runner_session_id"`
 	State            sessionState  `json:"state"`
 	PrivateIngestURL string        `json:"private_ingest_url,omitempty"`
-	Media            mediaResponse `json:"media,omitempty"`
 	CreatedAt        string        `json:"created_at"`
 }
 
@@ -158,15 +143,13 @@ const (
 type sessionMode string
 
 const (
-	modeLocalHLSServe sessionMode = "local_hls_serve"
 	modeGatewayIngest sessionMode = "gateway_ingest"
 )
 
 type outputMode string
 
 const (
-	outputModeLocalHLS outputMode = "local_hls"
-	outputModeS3Push   outputMode = "s3_push"
+	outputModeS3Push outputMode = "s3_push"
 )
 
 type liveIngestStatus struct {
@@ -199,12 +182,9 @@ type sessionRecord struct {
 	State            sessionState
 	Mode             sessionMode
 	CloseReason      string
-	RTMPURL          string
 	PrivateIngestURL string
 	StreamKey        string
-	HLSURL           string
 	IngestPipePath   string
-	RTMPPort         int
 	CreatedAt        time.Time
 	StartedAt        time.Time
 	LastPacketAt     time.Time
@@ -223,7 +203,6 @@ type buildRuntime struct {
 	Args      []string
 	ListenURL string
 	OutputDir string
-	MasterURL string
 	UsageUnit string
 	CreatedAt time.Time
 }

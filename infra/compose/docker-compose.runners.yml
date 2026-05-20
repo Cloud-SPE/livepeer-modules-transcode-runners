@@ -40,23 +40,16 @@ services:
       - /dev/dri:/dev/dri
     environment:
       - RUNNER_ADDR=:8080
-      - PUBLIC_HOST=localhost:${LIVE_RUNNER_PORT:-8088}
-      - PUBLIC_URL_SCHEME=http
       - TEMP_DIR=/tmp/live
       - PRESETS_FILE=/etc/runner/presets/live.yaml
-      - RTMP_PUBLIC_HOST=localhost
       - RUNNER_INGEST_PUBLIC_HOST=localhost
       - RUNNER_SHARED_INGEST_ADDR=:1935
-      - RTMP_LISTEN_HOST=0.0.0.0
-      - RTMP_PORT_START=${LIVE_RTMP_PORT_START:-19350}
-      - RTMP_PORT_END=${LIVE_RTMP_PORT_END:-19449}
     volumes:
       - ../presets:/etc/runner/presets:ro
       - live-temp:/tmp/live
     ports:
       - "${LIVE_RUNNER_PORT:-8088}:8080"
       - "${LIVE_SHARED_INGEST_PORT:-1935}:1935"
-      - "${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}:${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}"
 
   transcode_runner_intel:
     image: ${REGISTRY:-tztcloud}/transcode-runner-intel:${TAG:-v1.3.1}
@@ -99,23 +92,16 @@ services:
       - /dev/dri:/dev/dri
     environment:
       - RUNNER_ADDR=:8080
-      - PUBLIC_HOST=localhost:${LIVE_RUNNER_PORT:-8088}
-      - PUBLIC_URL_SCHEME=http
       - TEMP_DIR=/tmp/live
       - PRESETS_FILE=/etc/runner/presets/live.yaml
-      - RTMP_PUBLIC_HOST=localhost
       - RUNNER_INGEST_PUBLIC_HOST=localhost
       - RUNNER_SHARED_INGEST_ADDR=:1935
-      - RTMP_LISTEN_HOST=0.0.0.0
-      - RTMP_PORT_START=${LIVE_RTMP_PORT_START:-19350}
-      - RTMP_PORT_END=${LIVE_RTMP_PORT_END:-19449}
     volumes:
       - ../presets:/etc/runner/presets:ro
       - live-temp:/tmp/live
     ports:
       - "${LIVE_RUNNER_PORT:-8088}:8080"
       - "${LIVE_SHARED_INGEST_PORT:-1935}:1935"
-      - "${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}:${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}"
 
   transcode_runner_nvidia:
     image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v1.3.1}
@@ -155,23 +141,16 @@ services:
     runtime: nvidia
     environment:
       - RUNNER_ADDR=:8080
-      - PUBLIC_HOST=localhost:${LIVE_RUNNER_PORT:-8088}
-      - PUBLIC_URL_SCHEME=http
       - TEMP_DIR=/tmp/live
       - PRESETS_FILE=/etc/runner/presets/live.yaml
-      - RTMP_PUBLIC_HOST=localhost
       - RUNNER_INGEST_PUBLIC_HOST=localhost
       - RUNNER_SHARED_INGEST_ADDR=:1935
-      - RTMP_LISTEN_HOST=0.0.0.0
-      - RTMP_PORT_START=${LIVE_RTMP_PORT_START:-19350}
-      - RTMP_PORT_END=${LIVE_RTMP_PORT_END:-19449}
     volumes:
       - ../presets:/etc/runner/presets:ro
       - live-temp:/tmp/live
     ports:
       - "${LIVE_RUNNER_PORT:-8088}:8080"
       - "${LIVE_SHARED_INGEST_PORT:-1935}:1935"
-      - "${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}:${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}"
 
 volumes:
   transcode-temp: {}

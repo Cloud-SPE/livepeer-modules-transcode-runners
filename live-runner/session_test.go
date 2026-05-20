@@ -11,22 +11,6 @@ import (
 	"time"
 )
 
-func TestSessionStoreNextPort(t *testing.T) {
-	s := newSessionStore()
-	port, err := s.nextPort(1000, 1002)
-	if err != nil || port != 1000 {
-		t.Fatalf("port=%d err=%v", port, err)
-	}
-	rt := &sessionRuntime{rec: sessionRecord{RunnerSessionID: "a", RTMPPort: 1000}}
-	if err := s.add(rt); err != nil {
-		t.Fatal(err)
-	}
-	port, err = s.nextPort(1000, 1002)
-	if err != nil || port != 1001 {
-		t.Fatalf("port=%d err=%v", port, err)
-	}
-}
-
 func TestMarkProgressTransitionsToPublishing(t *testing.T) {
 	rt := &sessionRuntime{rec: sessionRecord{State: stateReady}}
 	delta, started := rt.markProgress(5)
