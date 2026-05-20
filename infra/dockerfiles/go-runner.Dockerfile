@@ -17,6 +17,7 @@ RUN go mod download
 COPY transcode-core/ ./transcode-core/
 COPY transcode-runner/ ./transcode-runner/
 COPY abr-runner/ ./abr-runner/
+COPY live-runner/ ./live-runner/
 
 ARG RUNNER_DIR
 ARG BINARY_NAME
@@ -40,8 +41,8 @@ RUN groupadd -r runner \
     && useradd -r -g runner -d /home/runner -s /usr/sbin/nologin runner \
     && groupadd -r render 2>/dev/null || true \
     && usermod -aG video,render runner \
-    && mkdir -p /etc/runner/presets /tmp/transcode /tmp/abr \
-    && chown -R runner:runner /etc/runner /tmp/transcode /tmp/abr
+    && mkdir -p /etc/runner/presets /tmp/transcode /tmp/abr /tmp/live \
+    && chown -R runner:runner /etc/runner /tmp/transcode /tmp/abr /tmp/live
 
 COPY --from=build "/bin/${BINARY_NAME}" "/usr/local/bin/${BINARY_NAME}"
 COPY "${RUNNER_DIR}/presets.yaml" "/etc/runner/presets/${PRESET_NAME}"

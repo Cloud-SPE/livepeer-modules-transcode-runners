@@ -17,5 +17,12 @@ Primary flows:
 - submit + poll single-rendition transcode
 - submit + poll ABR transcode
 
+Additional local `live-runner` coverage currently lives in Go unit tests:
+
+- session create/get/delete API
+- auth gate on the broker-facing API
+- HLS static serving
+- session store and watchdog behavior
+
 The direct-runner mode is intentional for this repo: no proxy or broker shim is
 required for local validation.

@@ -42,6 +42,7 @@ Repo-specific principles:
 
 - `transcode-runner/` — single-rendition VOD transcode runner
 - `abr-runner/` — ABR ladder runner
+- `live-runner/` — remote live RTMP ingest + HLS session runtime
 - `transcode-core/` — shared FFmpeg/GPU/HLS/preset logic
 - `transcode-tester/` — direct-runner smoke harness
 - `infra/dockerfiles/` — shared base and runner Dockerfiles

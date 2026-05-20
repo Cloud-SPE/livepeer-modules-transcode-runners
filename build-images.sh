@@ -43,6 +43,9 @@ ALL_IMAGES=(
   abr-runner-nvidia
   abr-runner-intel
   abr-runner-amd
+  live-runner-nvidia
+  live-runner-intel
+  live-runner-amd
   transcode-tester
 )
 
@@ -53,6 +56,9 @@ DEPLOYABLE_IMAGES=(
   abr-runner-nvidia
   abr-runner-intel
   abr-runner-amd
+  live-runner-nvidia
+  live-runner-intel
+  live-runner-amd
   transcode-tester
 )
 
@@ -140,6 +146,9 @@ build_one() {
     abr-runner-nvidia) build_runner abr-runner-nvidia ffmpeg-base-nvidia abr-runner abr-runner abr.yaml ;;
     abr-runner-intel) build_runner abr-runner-intel ffmpeg-base-intel abr-runner abr-runner abr.yaml ;;
     abr-runner-amd) build_runner abr-runner-amd ffmpeg-base-amd abr-runner abr-runner abr.yaml ;;
+    live-runner-nvidia) build_runner live-runner-nvidia ffmpeg-base-nvidia live-runner live-runner live.yaml ;;
+    live-runner-intel) build_runner live-runner-intel ffmpeg-base-intel live-runner live-runner live.yaml ;;
+    live-runner-amd) build_runner live-runner-amd ffmpeg-base-amd live-runner live-runner live.yaml ;;
     transcode-tester) build_tester ;;
     *) echo "unknown image: $1" >&2; exit 2 ;;
   esac

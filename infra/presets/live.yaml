@@ -1,0 +1,56 @@
+presets:
+  - name: default
+    description: Default live HLS ladder
+    type: live
+    format: hls
+    hls_mode: event
+    segment_duration: 4
+    renditions:
+      - name: source
+        video:
+          codec: h264
+          width: 1920
+          height: 1080
+          bitrate: 5000k
+          max_bitrate: 5500k
+          buf_size: 7500k
+          profile: high
+          level: "4.1"
+          pix_fmt: yuv420p
+        audio:
+          codec: aac
+          bitrate: 128k
+          channels: 2
+          sample_rate: 48000
+      - name: 720p
+        video:
+          codec: h264
+          width: 1280
+          height: 720
+          bitrate: 2500k
+          max_bitrate: 2750k
+          buf_size: 3750k
+          profile: main
+          level: "4.0"
+          pix_fmt: yuv420p
+        audio:
+          codec: aac
+          bitrate: 128k
+          channels: 2
+          sample_rate: 48000
+      - name: 480p
+        video:
+          codec: h264
+          width: 854
+          height: 480
+          bitrate: 1000k
+          max_bitrate: 1100k
+          buf_size: 1500k
+          profile: main
+          level: "3.1"
+          pix_fmt: yuv420p
+        audio:
+          codec: aac
+          bitrate: 96k
+          channels: 2
+          sample_rate: 48000

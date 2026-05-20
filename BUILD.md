@@ -19,6 +19,9 @@ Runner images:
 - `abr-runner-nvidia`
 - `abr-runner-intel`
 - `abr-runner-amd`
+- `live-runner-nvidia`
+- `live-runner-intel`
+- `live-runner-amd`
 - `transcode-tester`
 
 ## Script

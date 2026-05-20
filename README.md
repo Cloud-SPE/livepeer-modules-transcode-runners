@@ -1,6 +1,6 @@
 # livepeer-modules-transcode-runners
 
-Standalone home for the Livepeer video transcode runners. This repo ships two
+Standalone home for the Livepeer video transcode runners. This repo ships three
 Go HTTP runners plus shared FFmpeg/transcode logic, vendor-specific runtime
 images for NVIDIA, Intel, and AMD, and direct-runner smoke tooling.
 
@@ -12,6 +12,7 @@ images for NVIDIA, Intel, and AMD, and direct-runner smoke tooling.
 |---|---|---|
 | `transcode-runner-nvidia` / `-intel` / `-amd` | Single-rendition VOD transcode | `POST /v1/video/transcode` |
 | `abr-runner-nvidia` / `-intel` / `-amd` | Multi-rendition ABR ladder transcode | `POST /v1/video/transcode/abr` |
+| `live-runner-nvidia` / `-intel` / `-amd` | Remote live RTMP ingest + HLS session runtime | `POST /v1/video/live/sessions` |
 | `transcode-tester` | Node integration smoke harness | n/a |
 
 Shared code lives in [`transcode-core/`](./transcode-core). Build and runtime
@@ -23,7 +24,7 @@ Every gesture is Docker-first.
 
 ```bash
 ./build-images.sh build
-./build-images.sh build transcode-runner-nvidia abr-runner-nvidia
+./build-images.sh build transcode-runner-nvidia abr-runner-nvidia live-runner-nvidia
 ./build-images.sh validate
 ./build-images.sh clean
 ```
@@ -49,6 +50,8 @@ That production stack defaults to the GTX 1080 tuned preset pack in
 [`infra/presets/nvidia-gtx1080-transcode.yaml`](./infra/presets/nvidia-gtx1080-transcode.yaml)
 and
 [`infra/presets/nvidia-gtx1080-abr.yaml`](./infra/presets/nvidia-gtx1080-abr.yaml).
+The live runner uses [`infra/presets/live.yaml`](./infra/presets/live.yaml) by
+default.
 
 ## Repo layout
 
@@ -60,6 +63,7 @@ and
 ├── build-images.sh
 ├── go.mod, go.sum
 ├── abr-runner/                 # ABR ladder runner source + embedded defaults
+├── live-runner/                # remote live session runtime
 ├── transcode-runner/           # single-rendition runner source + embedded defaults
 ├── transcode-core/             # shared FFmpeg / GPU / preset / HLS logic
 ├── transcode-tester/           # Node smoke harness
@@ -96,6 +100,5 @@ Current NVIDIA build note:
 ## What is intentionally absent
 
 - No broker, gateway, or payment-layer code
-- No live RTMP runner
 - No checked-in secrets, keystores, or operator-local state
 - No copied historical plan/doc tree from the source monorepo

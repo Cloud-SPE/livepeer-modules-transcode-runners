@@ -1,10 +1,11 @@
 # DESIGN
 
-This repo ships two HTTP runners that orchestrate FFmpeg subprocesses for VOD
-video workloads:
+This repo ships three HTTP runners that orchestrate FFmpeg subprocesses for VOD
+and live video workloads:
 
 - `transcode-runner` handles single-rendition transcode jobs
 - `abr-runner` handles multi-rendition ABR ladder jobs
+- `live-runner` handles remote live RTMP ingest + HLS session work
 
 Both binaries import the shared `transcode-core` package, which owns:
 
@@ -27,6 +28,15 @@ The broker or any compatible upstream submits a job over HTTP. The runner:
 5. uploads outputs to caller-provided URLs
 6. exposes job status over a polling endpoint
 
+For `live-runner`, the shape is session-oriented instead:
+
+1. broker creates a runner session over HTTP
+2. runner allocates per-session RTMP ingest coordinates
+3. runner starts an FFmpeg live HLS runtime
+4. publisher pushes RTMP to the runner-owned media plane
+5. runner emits heartbeat and usage events back to the broker
+6. broker closes the runner session over HTTP when the live session ends
+
 Job state is in-memory only. Restarts lose active and historical job state.
 
 ## Image strategy
@@ -44,9 +54,12 @@ Each runner image then adds only:
 - the temp dir
 - a non-root runtime user
 
+`live-runner` keeps session state in memory and per-session HLS output on local
+scratch. It remains blind to customer identity and billing state; the broker is
+still the payment and session authority.
+
 ## Clean-slate constraints
 
-- No legacy live runner
 - No source-monorepo historical docs copied forward
 - No secrets or operator-local state
 - No broker-specific assumptions in the direct-runner smoke path

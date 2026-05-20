@@ -33,6 +33,27 @@ services:
     ports:
       - "${ABR_RUNNER_PORT:-8087}:8080"
 
+  live_runner_amd:
+    image: ${REGISTRY:-tztcloud}/live-runner-amd:${TAG:-v1.3.0}
+    profiles: ["amd"]
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - RUNNER_ADDR=:8080
+      - PUBLIC_HOST=localhost:${LIVE_RUNNER_PORT:-8088}
+      - TEMP_DIR=/tmp/live
+      - PRESETS_FILE=/etc/runner/presets/live.yaml
+      - RTMP_PUBLIC_HOST=localhost
+      - RTMP_LISTEN_HOST=0.0.0.0
+      - RTMP_PORT_START=${LIVE_RTMP_PORT_START:-19350}
+      - RTMP_PORT_END=${LIVE_RTMP_PORT_END:-19449}
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - live-temp:/tmp/live
+    ports:
+      - "${LIVE_RUNNER_PORT:-8088}:8080"
+      - "${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}:${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}"
+
   transcode_runner_intel:
     image: ${REGISTRY:-tztcloud}/transcode-runner-intel:${TAG:-v1.3.0}
     profiles: ["intel"]
@@ -67,6 +88,27 @@ services:
     ports:
       - "${ABR_RUNNER_PORT:-8087}:8080"
 
+  live_runner_intel:
+    image: ${REGISTRY:-tztcloud}/live-runner-intel:${TAG:-v1.3.0}
+    profiles: ["intel"]
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - RUNNER_ADDR=:8080
+      - PUBLIC_HOST=localhost:${LIVE_RUNNER_PORT:-8088}
+      - TEMP_DIR=/tmp/live
+      - PRESETS_FILE=/etc/runner/presets/live.yaml
+      - RTMP_PUBLIC_HOST=localhost
+      - RTMP_LISTEN_HOST=0.0.0.0
+      - RTMP_PORT_START=${LIVE_RTMP_PORT_START:-19350}
+      - RTMP_PORT_END=${LIVE_RTMP_PORT_END:-19449}
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - live-temp:/tmp/live
+    ports:
+      - "${LIVE_RUNNER_PORT:-8088}:8080"
+      - "${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}:${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}"
+
   transcode_runner_nvidia:
     image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v1.3.0}
     profiles: ["nvidia"]
@@ -99,6 +141,27 @@ services:
     ports:
       - "${ABR_RUNNER_PORT:-8087}:8080"
 
+  live_runner_nvidia:
+    image: ${REGISTRY:-tztcloud}/live-runner-nvidia:${TAG:-v1.3.0}
+    profiles: ["nvidia"]
+    runtime: nvidia
+    environment:
+      - RUNNER_ADDR=:8080
+      - PUBLIC_HOST=localhost:${LIVE_RUNNER_PORT:-8088}
+      - TEMP_DIR=/tmp/live
+      - PRESETS_FILE=/etc/runner/presets/live.yaml
+      - RTMP_PUBLIC_HOST=localhost
+      - RTMP_LISTEN_HOST=0.0.0.0
+      - RTMP_PORT_START=${LIVE_RTMP_PORT_START:-19350}
+      - RTMP_PORT_END=${LIVE_RTMP_PORT_END:-19449}
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - live-temp:/tmp/live
+    ports:
+      - "${LIVE_RUNNER_PORT:-8088}:8080"
+      - "${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}:${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}"
+
 volumes:
   transcode-temp: {}
   abr-temp: {}
+  live-temp: {}
