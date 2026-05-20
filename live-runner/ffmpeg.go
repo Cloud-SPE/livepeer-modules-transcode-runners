@@ -3,16 +3,20 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	transcode "github.com/Cloud-SPE/livepeer-modules-transcode-runners/transcode-core"
 )
+
+const ffmpegStderrTailLines = 20
 
 func buildRuntimePlan(cfg config, rec sessionRecord, hw transcode.HWProfile) (buildRuntime, error) {
 	if err := os.MkdirAll(rec.OutputDir, 0o755); err != nil {
@@ -24,7 +28,7 @@ func buildRuntimePlan(cfg config, rec sessionRecord, hw transcode.HWProfile) (bu
 		}
 	}
 
-	listenURL := fmt.Sprintf("rtmp://%s:%d/live/%s?listen=1", cfg.RTMPListenHost, rec.RTMPPort, rec.StreamKey)
+	listenURL := fmt.Sprintf("rtmp://%s:%d/live/%s", cfg.RTMPListenHost, rec.RTMPPort, rec.StreamKey)
 	args := buildLiveFFmpegArgs(listenURL, rec.OutputDir, rec.Preset, hw, cfg.HLSWindowSegments)
 	return buildRuntime{
 		Args:      args,
@@ -55,6 +59,8 @@ func startFFmpeg(rt *sessionRuntime, plan buildRuntime, hw transcode.HWProfile) 
 	go func() {
 		defer close(rt.ffmpegDone)
 		scanner := bufio.NewScanner(stderr)
+		scanner.Split(scanCRLF)
+		stderrTail := newLogTail(ffmpegStderrTailLines)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -69,25 +75,145 @@ func startFFmpeg(rt *sessionRuntime, plan buildRuntime, hw transcode.HWProfile) 
 				if delta > 0 {
 					rt.event("session.usage.tick", total, delta, "", nil)
 				}
+				continue
 			}
+			stderrTail.add(line)
+			log.Printf("[live %s] ffmpeg: %s", rt.rec.RunnerSessionID, line)
 		}
 		err := cmd.Wait()
 		if rt.terminating.Load() {
 			return
 		}
 		if err != nil {
-			log.Printf("[live %s] ffmpeg exited: %v", rt.rec.RunnerSessionID, err)
-			rt.fail("ffmpeg_exit_nonzero")
-			rt.event("session.failed", rt.lastUsageTotal.Load(), 0, "ffmpeg_exit_nonzero", map[string]any{
+			tail := stderrTail.join()
+			if tail != "" {
+				log.Printf("[live %s] ffmpeg exited: %v stderr_tail=%q", rt.rec.RunnerSessionID, err, tail)
+			} else {
+				log.Printf("[live %s] ffmpeg exited: %v", rt.rec.RunnerSessionID, err)
+			}
+			details := map[string]any{
 				"error_text": err.Error(),
 				"gpu":        hw.GPUName,
-			})
+			}
+			if tail != "" {
+				details["stderr_tail"] = tail
+			}
+			rt.fail("ffmpeg_exit_nonzero")
+			rt.event("session.failed", rt.lastUsageTotal.Load(), 0, "ffmpeg_exit_nonzero", details)
 			return
 		}
 		rt.finishTerminate("completed", false)
 		rt.event("session.ended", rt.lastUsageTotal.Load(), 0, "completed", nil)
 	}()
+
+	if err := waitForRTMPReady(rt.cfg, rt.rec.RTMPPort, rt.cfg.SessionReadyTimeout); err != nil {
+		cancel()
+		<-rt.ffmpegDone
+		return err
+	}
 	return nil
+}
+
+func waitForRTMPReady(cfg config, port int, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		ready, err := listenerReady(port)
+		if err == nil && ready {
+			return nil
+		}
+		lastErr = err
+		time.Sleep(100 * time.Millisecond)
+	}
+	if lastErr == nil {
+		lastErr = errors.New("timed out waiting for RTMP listener")
+	}
+	return fmt.Errorf("rtmp listener not ready on port %d after %s: %w", port, timeout, lastErr)
+}
+
+func listenerReady(port int) (bool, error) {
+	hexPort := strings.ToUpper(strconv.FormatInt(int64(port), 16))
+	needle := ":" + strings.Repeat("0", max(0, 4-len(hexPort))) + hexPort
+	ready4, err := listenerReadyInFile("/proc/net/tcp", needle)
+	if err != nil {
+		return false, err
+	}
+	if ready4 {
+		return true, nil
+	}
+	return listenerReadyInFile("/proc/net/tcp6", needle)
+}
+
+func listenerReadyInFile(path, needle string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines[1:] {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		if strings.HasSuffix(strings.ToUpper(fields[1]), needle) && fields[3] == "0A" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func scanCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	for i, b := range data {
+		if b == '\n' || b == '\r' {
+			return i + 1, data[:i], nil
+		}
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+type logTail struct {
+	lines []string
+	next  int
+	full  bool
+}
+
+func newLogTail(limit int) *logTail {
+	if limit <= 0 {
+		limit = 1
+	}
+	return &logTail{lines: make([]string, limit)}
+}
+
+func (t *logTail) add(line string) {
+	if len(t.lines) == 0 {
+		return
+	}
+	t.lines[t.next] = line
+	t.next = (t.next + 1) % len(t.lines)
+	if t.next == 0 {
+		t.full = true
+	}
+}
+
+func (t *logTail) join() string {
+	if len(t.lines) == 0 {
+		return ""
+	}
+	if !t.full {
+		return strings.Join(t.lines[:t.next], " | ")
+	}
+	ordered := append([]string{}, t.lines[t.next:]...)
+	ordered = append(ordered, t.lines[:t.next]...)
+	return strings.Join(ordered, " | ")
 }
 
 func buildLiveFFmpegArgs(listenURL, outputDir string, preset transcode.ABRPreset, hw transcode.HWProfile, window int) []string {
@@ -95,6 +221,7 @@ func buildLiveFFmpegArgs(listenURL, outputDir string, preset transcode.ABRPreset
 		"-y",
 		"-fflags", "+nobuffer",
 		"-flags", "+low_delay",
+		"-listen", "1",
 		"-i", listenURL,
 	}
 

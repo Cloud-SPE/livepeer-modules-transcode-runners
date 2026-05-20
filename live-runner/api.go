@@ -77,9 +77,9 @@ func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"build":   transcode.BuildSummary("live-runner"),
-		"gpu":     s.hw.GPUName,
+		"ok":       true,
+		"build":    transcode.BuildSummary("live-runner"),
+		"gpu":      s.hw.GPUName,
 		"sessions": len(s.store.snapshot()),
 	})
 }
@@ -119,6 +119,9 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	rt.mu.Lock()
+	rt.setState(stateReady, "")
+	rt.mu.Unlock()
 	resp := createSessionResponse{
 		RunnerSessionID: rt.rec.RunnerSessionID,
 		State:           rt.rec.State,

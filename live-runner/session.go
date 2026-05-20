@@ -67,7 +67,6 @@ func newSessionRuntime(cfg config, req liveSessionRequest, preset transcodePrese
 		cfg:       cfg,
 		callbacks: callbacks,
 	}
-	rt.setState(stateReady, "")
 	return rt, nil
 }
 

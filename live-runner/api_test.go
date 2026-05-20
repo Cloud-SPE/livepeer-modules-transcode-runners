@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestServer(t *testing.T) *server {
@@ -17,11 +18,47 @@ func newTestServer(t *testing.T) *server {
 	cfg.TempDir = dir
 	cfg.PublicHost = "example.com"
 	cfg.BrokerToken = "secret"
+	cfg.FFmpegBin = writeFakeFFmpeg(t)
+	cfg.SessionReadyTimeout = 2 * time.Second
 	s, err := newServer(cfg)
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
 	}
 	return s
+}
+
+func writeFakeFFmpeg(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fake-ffmpeg.py")
+	script := `#!/usr/bin/env python3
+import socket
+import sys
+import time
+
+input_url = ""
+args = sys.argv[1:]
+idx = 0
+while idx < len(args):
+    if args[idx] == "-i" and idx + 1 < len(args):
+        input_url = args[idx + 1]
+        idx += 2
+        continue
+    idx += 1
+
+port = input_url.split("://", 1)[1].split(":", 1)[1].split("/", 1)[0]
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(port)))
+s.listen(1)
+try:
+    time.sleep(60)
+finally:
+    s.close()
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+	return path
 }
 
 func TestCreateSessionRequiresAuth(t *testing.T) {
@@ -57,6 +94,13 @@ func TestCreateGetDeleteSession(t *testing.T) {
 	}
 	if out.RunnerSessionID == "" || out.Media.Ingest.StreamKey == "" {
 		t.Fatalf("unexpected create response: %+v", out)
+	}
+	ready, err := listenerReady(19350)
+	if err != nil {
+		t.Fatalf("check listener: %v", err)
+	}
+	if !ready {
+		t.Fatal("rtmp listener not ready")
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "/v1/video/live/sessions/"+out.RunnerSessionID, nil)

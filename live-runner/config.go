@@ -20,6 +20,7 @@ type config struct {
 	RTMPListenHost      string
 	RTMPPortStart       int
 	RTMPPortEnd         int
+	SessionReadyTimeout time.Duration
 	SessionNoPublishTTL time.Duration
 	SessionIdleTTL      time.Duration
 	CallbackTimeout     time.Duration
@@ -42,6 +43,7 @@ func loadConfig() config {
 		RTMPListenHost:      env("RTMP_LISTEN_HOST", "0.0.0.0"),
 		RTMPPortStart:       envInt("RTMP_PORT_START", 19350),
 		RTMPPortEnd:         envInt("RTMP_PORT_END", 19449),
+		SessionReadyTimeout: envDuration("SESSION_READY_TIMEOUT", 5*time.Second),
 		SessionNoPublishTTL: envDuration("SESSION_NO_PUBLISH_TTL", 2*time.Minute),
 		SessionIdleTTL:      envDuration("SESSION_IDLE_TTL", 30*time.Second),
 		CallbackTimeout:     envDuration("BROKER_CALLBACK_TIMEOUT", 5*time.Second),

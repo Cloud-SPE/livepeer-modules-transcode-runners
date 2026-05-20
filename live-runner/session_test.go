@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"testing"
 	"time"
 )
@@ -42,5 +44,28 @@ func TestWatchdogNoPublishTimeout(t *testing.T) {
 	}
 	if err := rt.watchdog(10 * time.Second); err == nil {
 		t.Fatal("expected timeout")
+	}
+}
+
+func TestLogTailKeepsRecentLines(t *testing.T) {
+	tail := newLogTail(3)
+	tail.add("a")
+	tail.add("b")
+	tail.add("c")
+	tail.add("d")
+	if got := tail.join(); got != "b | c | d" {
+		t.Fatalf("tail=%q", got)
+	}
+}
+
+func TestScanCRLFSplitsProgressLines(t *testing.T) {
+	scanner := bufio.NewScanner(bytes.NewBufferString("frame=   70 fps= 47\rframe=   85 fps= 42\nfinal"))
+	scanner.Split(scanCRLF)
+	var got []string
+	for scanner.Scan() {
+		got = append(got, scanner.Text())
+	}
+	if len(got) != 3 || got[0] != "frame=   70 fps= 47" || got[1] != "frame=   85 fps= 42" || got[2] != "final" {
+		t.Fatalf("tokens=%q", got)
 	}
 }
