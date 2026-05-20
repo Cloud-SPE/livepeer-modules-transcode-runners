@@ -129,7 +129,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Media.Ingest.RTMPURL = rt.rec.RTMPURL
 	resp.Media.Ingest.StreamKey = rt.rec.StreamKey
-	resp.Media.Playback.HLSURL = rt.rec.HLSURL
+	resp.Media.Playback.HLSURL = s.publicHLSURL(r, rt.rec.HLSURL)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -219,6 +219,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (s *server) publicHLSURL(r *http.Request, path string) string {
+	scheme := s.cfg.publicURLScheme(r.Header.Get("X-Forwarded-Proto"))
+	return scheme + "://" + s.cfg.PublicHost + path
 }
 
 func (s *server) run(ctx context.Context) error {

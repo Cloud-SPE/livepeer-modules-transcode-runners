@@ -10,6 +10,7 @@ import (
 type config struct {
 	RunnerAddr          string
 	PublicHost          string
+	PublicScheme        string
 	TempDir             string
 	HLSBasePath         string
 	HLSWindowSegments   int
@@ -33,6 +34,7 @@ func loadConfig() config {
 	return config{
 		RunnerAddr:          env("RUNNER_ADDR", ":8080"),
 		PublicHost:          env("PUBLIC_HOST", "127.0.0.1:8080"),
+		PublicScheme:        env("PUBLIC_URL_SCHEME", ""),
 		TempDir:             env("TEMP_DIR", "/tmp/live"),
 		HLSBasePath:         env("HLS_BASE_PATH", "/_hls"),
 		HLSWindowSegments:   envInt("HLS_WINDOW_SEGMENTS", 6),
@@ -51,6 +53,16 @@ func loadConfig() config {
 		UsageTickInterval:   envDuration("SESSION_USAGE_TICK_INTERVAL", 5*time.Second),
 		FFmpegBin:           env("FFMPEG_BIN", "ffmpeg"),
 	}
+}
+
+func (c config) publicURLScheme(fallback string) string {
+	if v := strings.ToLower(strings.TrimSpace(c.PublicScheme)); v == "http" || v == "https" {
+		return v
+	}
+	if v := strings.ToLower(strings.TrimSpace(fallback)); v == "http" || v == "https" {
+		return v
+	}
+	return "http"
 }
 
 func env(key, fallback string) string {

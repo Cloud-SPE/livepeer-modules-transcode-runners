@@ -95,6 +95,9 @@ func TestCreateGetDeleteSession(t *testing.T) {
 	if out.RunnerSessionID == "" || out.Media.Ingest.StreamKey == "" {
 		t.Fatalf("unexpected create response: %+v", out)
 	}
+	if out.Media.Playback.HLSURL != "http://example.com/_hls/"+out.RunnerSessionID+"/master.m3u8" {
+		t.Fatalf("unexpected hls url %q", out.Media.Playback.HLSURL)
+	}
 	ready, err := listenerReady(19350)
 	if err != nil {
 		t.Fatalf("check listener: %v", err)
@@ -119,6 +122,60 @@ func TestCreateGetDeleteSession(t *testing.T) {
 	s.routes().ServeHTTP(delRec, delReq)
 	if delRec.Code != http.StatusOK {
 		t.Fatalf("delete status=%d body=%s", delRec.Code, delRec.Body.String())
+	}
+}
+
+func TestCreateSessionUsesForwardedProtoForHLSURL(t *testing.T) {
+	s := newTestServer(t)
+	body := liveSessionRequest{
+		BrokerSessionID: "bsess_2",
+		WorkID:          "work_2",
+		CapabilityID:    "livepeer:transcode/live-rtmp-hls-abr",
+		OfferingID:      "default",
+		SessionParams:   liveSessionParams{Name: "https"},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/video/live/sessions", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out createSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if out.Media.Playback.HLSURL != "https://example.com/_hls/"+out.RunnerSessionID+"/master.m3u8" {
+		t.Fatalf("unexpected forwarded hls url %q", out.Media.Playback.HLSURL)
+	}
+}
+
+func TestCreateSessionUsesConfiguredSchemeForHLSURL(t *testing.T) {
+	s := newTestServer(t)
+	s.cfg.PublicScheme = "https"
+	body := liveSessionRequest{
+		BrokerSessionID: "bsess_3",
+		WorkID:          "work_3",
+		CapabilityID:    "livepeer:transcode/live-rtmp-hls-abr",
+		OfferingID:      "default",
+		SessionParams:   liveSessionParams{Name: "configured"},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/video/live/sessions", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out createSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if out.Media.Playback.HLSURL != "https://example.com/_hls/"+out.RunnerSessionID+"/master.m3u8" {
+		t.Fatalf("unexpected configured hls url %q", out.Media.Playback.HLSURL)
 	}
 }
 

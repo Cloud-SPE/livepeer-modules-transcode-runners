@@ -60,7 +60,7 @@ func newSessionRuntime(cfg config, req liveSessionRequest, preset transcodePrese
 	}
 	rec.RTMPURL = "rtmp://" + cfg.RTMPHost + ":" + itoa(port) + "/live"
 	rec.OutputDir = cfg.TempDir + "/" + sessionID
-	rec.HLSURL = "http://" + cfg.PublicHost + cfg.HLSBasePath + "/" + sessionID + "/master.m3u8"
+	rec.HLSURL = cfg.HLSBasePath + "/" + sessionID + "/master.m3u8"
 
 	rt := &sessionRuntime{
 		rec:       rec,
