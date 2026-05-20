@@ -3,13 +3,11 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -118,57 +116,6 @@ func startFFmpeg(rt *sessionRuntime, plan buildRuntime, hw transcode.HWProfile) 
 
 	rt.setListenerBound(true)
 	return nil
-}
-
-func waitForRTMPReady(cfg config, port int, timeout time.Duration) error {
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		ready, err := listenerReady(port)
-		if err == nil && ready {
-			return nil
-		}
-		lastErr = err
-		time.Sleep(100 * time.Millisecond)
-	}
-	if lastErr == nil {
-		lastErr = errors.New("timed out waiting for RTMP listener")
-	}
-	return fmt.Errorf("rtmp listener not ready on port %d after %s: %w", port, timeout, lastErr)
-}
-
-func listenerReady(port int) (bool, error) {
-	hexPort := strings.ToUpper(strconv.FormatInt(int64(port), 16))
-	needle := ":" + strings.Repeat("0", max(0, 4-len(hexPort))) + hexPort
-	ready4, err := listenerReadyInFile("/proc/net/tcp", needle)
-	if err != nil {
-		return false, err
-	}
-	if ready4 {
-		return true, nil
-	}
-	return listenerReadyInFile("/proc/net/tcp6", needle)
-}
-
-func listenerReadyInFile(path, needle string) (bool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines[1:] {
-		fields := strings.Fields(line)
-		if len(fields) < 4 {
-			continue
-		}
-		if strings.HasSuffix(strings.ToUpper(fields[1]), needle) && fields[3] == "0A" {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func scanCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
