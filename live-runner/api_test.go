@@ -583,6 +583,85 @@ func TestGatewayIngestEndToEndPublishesAndUploadsHLS(t *testing.T) {
 	rt.stop("test_done")
 }
 
+func TestGatewayIngestUploadFailureThresholdAndRecovery(t *testing.T) {
+	s3 := newFakeS3Server()
+	defer s3.close()
+
+	s := newTestServer(t)
+	s.cfg.OutputSyncInterval = 50 * time.Millisecond
+	s.cfg.OutputFailureThreshold = 2
+	body := liveSessionRequest{
+		BrokerSessionID: "bsess_fail",
+		WorkID:          "work_fail",
+		CapabilityID:    "livepeer:transcode/live-gateway-ingest",
+		OfferingID:      "default",
+		SessionParams:   liveSessionParams{Name: "gateway"},
+		OutputCredential: &s3OutputCredential{
+			Endpoint:        s3.server.URL,
+			Region:          "us-east-1",
+			Bucket:          "bucket",
+			KeyPrefix:       "live-out/a/fail/",
+			AccessKeyID:     "AKIA_TEST",
+			SecretAccessKey: "secret",
+			SessionToken:    "token",
+			ExpiresAt:       "2026-05-20T22:10:00Z",
+		},
+		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_fail"},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/video/live/sessions", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out createSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	rt := s.store.get(out.RunnerSessionID)
+	if rt == nil {
+		t.Fatal("session missing from store")
+	}
+
+	rt.mu.Lock()
+	rt.setState(statePublishing, "")
+	rt.rec.Ingest.Authenticated = true
+	rt.rec.Ingest.ConnectedPublisher = true
+	rt.mu.Unlock()
+
+	masterPath := filepath.Join(rt.rec.OutputDir, "master.m3u8")
+	if err := os.WriteFile(masterPath, []byte("#EXTM3U\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s3.failNextPutRequests(2)
+	waitForCondition(t, 3*time.Second, func() bool {
+		got := rt.query()
+		return got.State == stateStalled && got.Output.PutFailureCount >= 2 && got.Output.LastPutError != nil
+	})
+
+	if err := os.WriteFile(masterPath, []byte("#EXTM3U\n#EXT-X-VERSION:3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, 3*time.Second, func() bool {
+		got := rt.query()
+		files := s3.snapshot()
+		_, uploaded := files["bucket/live-out/a/fail/master.m3u8"]
+		return got.State == statePublishing && uploaded && got.Output.LastManifestPutAt != nil
+	})
+
+	got := rt.query()
+	if got.Output.PutSuccessCount < 1 {
+		t.Fatalf("put success count=%d", got.Output.PutSuccessCount)
+	}
+	if got.Output.PutFailureCount < 2 {
+		t.Fatalf("put failure count=%d", got.Output.PutFailureCount)
+	}
+	rt.stop("test_done")
+}
+
 func TestHLSHandlerBlocksTraversal(t *testing.T) {
 	dir := t.TempDir()
 	h := hlsHandler(dir, "/_hls")
@@ -635,9 +714,11 @@ func TestHealthIncludesMetrics(t *testing.T) {
 }
 
 type fakeS3Server struct {
-	server *httptest.Server
-	mu     sync.Mutex
-	files  map[string][]byte
+	server       *httptest.Server
+	mu           sync.Mutex
+	files        map[string][]byte
+	failNextPuts int
+	putAttempts  int
 }
 
 func newFakeS3Server() *fakeS3Server {
@@ -652,6 +733,13 @@ func newFakeS3Server() *fakeS3Server {
 				return
 			}
 			f.mu.Lock()
+			f.putAttempts++
+			if f.failNextPuts > 0 {
+				f.failNextPuts--
+				f.mu.Unlock()
+				http.Error(w, "simulated put failure", http.StatusForbidden)
+				return
+			}
 			f.files[key] = body
 			f.mu.Unlock()
 			w.WriteHeader(http.StatusOK)
@@ -665,6 +753,12 @@ func newFakeS3Server() *fakeS3Server {
 		}
 	}))
 	return f
+}
+
+func (f *fakeS3Server) failNextPutRequests(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failNextPuts = n
 }
 
 func (f *fakeS3Server) snapshot() map[string][]byte {
