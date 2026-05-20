@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,17 +13,25 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	amf0 "github.com/yutopp/go-amf0"
+	flvtag "github.com/yutopp/go-flv/tag"
+	rtmp "github.com/yutopp/go-rtmp"
+	rtmpmsg "github.com/yutopp/go-rtmp/message"
 )
 
 func newTestServer(t *testing.T) *server {
 	t.Helper()
 	dir := t.TempDir()
+	port := reserveTestPort(t)
 	cfg := loadConfig()
 	cfg.TempDir = dir
 	cfg.PublicHost = "example.com"
 	cfg.BrokerToken = "secret"
 	cfg.FFmpegBin = writeFakeFFmpeg(t)
 	cfg.SessionReadyTimeout = 2 * time.Second
+	cfg.RTMPPortStart = port
+	cfg.RTMPPortEnd = port
 	s, err := newServer(cfg)
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
@@ -37,6 +46,7 @@ func writeFakeFFmpeg(t *testing.T) string {
 import socket
 import sys
 import time
+import os
 
 input_url = ""
 args = sys.argv[1:]
@@ -48,20 +58,38 @@ while idx < len(args):
         continue
     idx += 1
 
-port = input_url.split("://", 1)[1].split(":", 1)[1].split("/", 1)[0]
-s = socket.socket()
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(("127.0.0.1", int(port)))
-s.listen(1)
-try:
-    time.sleep(60)
-finally:
-    s.close()
+if "://" in input_url:
+    port = input_url.split("://", 1)[1].split(":", 1)[1].split("/", 1)[0]
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("127.0.0.1", int(port)))
+    s.listen(1)
+    try:
+        time.sleep(60)
+    finally:
+        s.close()
+else:
+    with open(input_url, "rb", buffering=0) as f:
+        try:
+            os.read(f.fileno(), 64)
+        except Exception:
+            pass
+        time.sleep(60)
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 	return path
+}
+
+func reserveTestPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
 }
 
 func TestCreateSessionRequiresAuth(t *testing.T) {
@@ -101,7 +129,7 @@ func TestCreateGetDeleteSession(t *testing.T) {
 	if out.Media.Playback.HLSURL != "http://example.com/_hls/"+out.RunnerSessionID+"/master.m3u8" {
 		t.Fatalf("unexpected hls url %q", out.Media.Playback.HLSURL)
 	}
-	ready, err := listenerReady(19350)
+	ready, err := listenerReady(s.cfg.RTMPPortStart)
 	if err != nil {
 		t.Fatalf("check listener: %v", err)
 	}
@@ -241,6 +269,9 @@ func TestCreateSessionGatewayIngestMode(t *testing.T) {
 	if got.Output.TargetPrefix != "live-out/a/b/" {
 		t.Fatalf("target prefix=%q", got.Output.TargetPrefix)
 	}
+	if rt := s.store.get(out.RunnerSessionID); rt != nil {
+		rt.stop("test_done")
+	}
 }
 
 func TestGatewayIngestUploadsAndDeletesSegments(t *testing.T) {
@@ -317,6 +348,74 @@ func TestGatewayIngestUploadsAndDeletesSegments(t *testing.T) {
 	if got.Output.TargetPrefix != "live-out/a/b/" {
 		t.Fatalf("target prefix=%q", got.Output.TargetPrefix)
 	}
+	if rt := s.store.get(out.RunnerSessionID); rt != nil {
+		rt.stop("test_done")
+	}
+}
+
+func TestSharedIngestPublishTransitionsSessionToPublishing(t *testing.T) {
+	s3 := newFakeS3Server()
+	defer s3.close()
+
+	s := newTestServer(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	shared, err := startSharedIngest(s.store, s.metrics, addr)
+	if err != nil {
+		t.Fatalf("start shared ingest: %v", err)
+	}
+	defer shared.Close()
+	s.cfg.IngestPublicHost = "127.0.0.1"
+	s.cfg.SharedIngestAddr = addr
+
+	body := liveSessionRequest{
+		BrokerSessionID: "bsess_publish",
+		WorkID:          "work_publish",
+		CapabilityID:    "livepeer:transcode/live-gateway-ingest",
+		OfferingID:      "default",
+		SessionParams:   liveSessionParams{Name: "publish"},
+		OutputCredential: &s3OutputCredential{
+			Endpoint:        s3.server.URL,
+			Region:          "us-east-1",
+			Bucket:          "bucket",
+			KeyPrefix:       "live-out/a/publish/",
+			AccessKeyID:     "AKIA_TEST",
+			SecretAccessKey: "secret",
+			SessionToken:    "token",
+			ExpiresAt:       "2026-05-20T22:10:00Z",
+		},
+		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_publish"},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/video/live/sessions", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out createSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	rt := s.store.get(out.RunnerSessionID)
+	if rt == nil {
+		t.Fatal("session missing from store")
+	}
+
+	if err := publishViaSharedIngress(addr, rt.rec.StreamKey); err != nil {
+		t.Fatalf("publish via shared ingress: %v", err)
+	}
+
+	waitForCondition(t, 3*time.Second, func() bool {
+		got := rt.query()
+		return got.State == statePublishing && got.Ingest.Authenticated && got.Ingest.ConnectedPublisher
+	})
+	rt.stop("test_done")
 }
 
 func TestHLSHandlerBlocksTraversal(t *testing.T) {
@@ -427,4 +526,62 @@ func waitForCondition(t *testing.T, timeout time.Duration, fn func() bool) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatal("condition not met before timeout")
+}
+
+func publishViaSharedIngress(addr, streamKey string) error {
+	client, err := rtmp.Dial("rtmp", addr, &rtmp.ConnConfig{})
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	connect := &rtmpmsg.NetConnectionConnect{
+		Command: rtmpmsg.NetConnectionConnectCommand{
+			App:           "live",
+			TCURL:         "rtmp://" + addr + "/live",
+			FlashVer:      "test-publisher",
+			Capabilities:  15,
+			AudioCodecs:   4071,
+			VideoCodecs:   252,
+			VideoFunction: 1,
+		},
+	}
+	if err := client.Connect(connect); err != nil {
+		return err
+	}
+	stream, err := client.CreateStream(nil, 128)
+	if err != nil {
+		return err
+	}
+	if err := stream.Publish(&rtmpmsg.NetStreamPublish{
+		PublishingName: streamKey,
+		PublishingType: "live",
+	}); err != nil {
+		return err
+	}
+
+	script := &flvtag.ScriptData{
+		Objects: map[string]amf0.ECMAArray{
+			"onMetaData": {
+				"width":  1280.0,
+				"height": 720.0,
+			},
+		},
+	}
+	scriptBody := new(bytes.Buffer)
+	if err := flvtag.EncodeScriptData(scriptBody, script); err != nil {
+		return err
+	}
+	if err := stream.WriteDataMessage(8, 0, "@setDataFrame", &rtmpmsg.NetStreamSetDataFrame{Payload: scriptBody.Bytes()}); err != nil {
+		return err
+	}
+	if err := stream.Write(5, 1, &rtmpmsg.AudioMessage{Payload: bytes.NewBuffer([]byte{0xAF, 0x00})}); err != nil {
+		return err
+	}
+	if err := stream.Write(6, 2, &rtmpmsg.VideoMessage{Payload: bytes.NewBuffer([]byte{0x17, 0x00, 0x00, 0x00, 0x00})}); err != nil {
+		return err
+	}
+	time.Sleep(250 * time.Millisecond)
+	_ = stream.Close()
+	return nil
 }

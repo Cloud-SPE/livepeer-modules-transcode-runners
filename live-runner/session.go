@@ -86,6 +86,9 @@ func newSessionRuntime(cfg config, req liveSessionRequest, preset transcodePrese
 	rec.RTMPURL = "rtmp://" + cfg.RTMPHost + ":" + itoa(port) + "/live"
 	rec.PrivateIngestURL = "rtmp://" + cfg.IngestPublicHost + ":" + cfg.sharedIngestPort() + "/live/" + streamKey
 	rec.OutputDir = cfg.TempDir + "/" + sessionID
+	if mode == modeGatewayIngest {
+		rec.IngestPipePath = rec.OutputDir + "/ingest.flv"
+	}
 	if mode == modeLocalHLSServe {
 		rec.HLSURL = cfg.HLSBasePath + "/" + sessionID + "/master.m3u8"
 	}
@@ -418,6 +421,18 @@ func (rt *sessionRuntime) notePublisherAccepted() {
 
 func (rt *sessionRuntime) noteIngestPacket(now time.Time) {
 	rt.mu.Lock()
+	if rt.rec.State == stateReady || rt.rec.State == stateProvisioning || rt.rec.State == stateStalled {
+		if rt.rec.StartedAt.IsZero() {
+			rt.rec.StartedAt = now
+		}
+		rt.rec.LastPacketAt = now
+		rt.rec.Ingest.Authenticated = true
+		rt.rec.Ingest.ConnectedPublisher = true
+		rt.setState(statePublishing, "")
+	} else if rt.rec.State == statePublishing {
+		rt.rec.LastPacketAt = now
+		rt.rec.Ingest.ConnectedPublisher = true
+	}
 	rt.rec.Ingest.LastPacketAt = now
 	rt.mu.Unlock()
 }

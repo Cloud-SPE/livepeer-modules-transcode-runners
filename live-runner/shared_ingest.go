@@ -1,14 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
 	"time"
 
 	"github.com/sirupsen/logrus"
+	flv "github.com/yutopp/go-flv"
 	flvtag "github.com/yutopp/go-flv/tag"
 	rtmp "github.com/yutopp/go-rtmp"
 	rtmpmsg "github.com/yutopp/go-rtmp/message"
@@ -71,8 +72,8 @@ type gatewayIngestHandler struct {
 	metrics *runnerMetrics
 
 	session *sessionRuntime
-	client  *rtmp.ClientConn
-	stream  *rtmp.Stream
+	writer  io.WriteCloser
+	encoder *flv.Encoder
 }
 
 func (h *gatewayIngestHandler) OnPublish(_ *rtmp.StreamContext, _ uint32, cmd *rtmpmsg.NetStreamPublish) error {
@@ -83,13 +84,13 @@ func (h *gatewayIngestHandler) OnPublish(_ *rtmp.StreamContext, _ uint32, cmd *r
 		}
 		return fmt.Errorf("unknown ingest stream")
 	}
-	client, stream, err := dialInternalPublish(rt)
+	writer, encoder, err := openIngestPipe(rt)
 	if err != nil {
 		return err
 	}
 	h.session = rt
-	h.client = client
-	h.stream = stream
+	h.writer = writer
+	h.encoder = encoder
 	rt.notePublisherAccepted()
 	return nil
 }
@@ -102,51 +103,50 @@ func (h *gatewayIngestHandler) OnPlay(_ *rtmp.StreamContext, _ uint32, _ *rtmpms
 }
 
 func (h *gatewayIngestHandler) OnSetDataFrame(timestamp uint32, data *rtmpmsg.NetStreamSetDataFrame) error {
-	if h.stream == nil || h.session == nil {
+	if h.session == nil {
 		return fmt.Errorf("publish not initialized")
 	}
 	h.session.noteIngestPacket(time.Now().UTC())
-	return h.stream.WriteDataMessage(8, timestamp, "@setDataFrame", &rtmpmsg.NetStreamSetDataFrame{Payload: data.Payload})
+	_ = timestamp
+	_ = data
+	return nil
 }
 
 func (h *gatewayIngestHandler) OnAudio(timestamp uint32, payload io.Reader) error {
-	if h.stream == nil || h.session == nil {
+	if h.encoder == nil || h.session == nil {
 		return fmt.Errorf("publish not initialized")
 	}
 	var audio flvtag.AudioData
 	if err := flvtag.DecodeAudioData(payload, &audio); err != nil {
 		return err
 	}
-	buf := new(bytes.Buffer)
-	if err := flvtag.EncodeAudioData(buf, &audio); err != nil {
-		return err
-	}
 	h.session.noteIngestPacket(time.Now().UTC())
-	return h.stream.Write(5, timestamp, &rtmpmsg.AudioMessage{Payload: buf})
+	return h.encoder.Encode(&flvtag.FlvTag{
+		TagType:   flvtag.TagTypeAudio,
+		Timestamp: timestamp,
+		Data:      &audio,
+	})
 }
 
 func (h *gatewayIngestHandler) OnVideo(timestamp uint32, payload io.Reader) error {
-	if h.stream == nil || h.session == nil {
+	if h.encoder == nil || h.session == nil {
 		return fmt.Errorf("publish not initialized")
 	}
 	var video flvtag.VideoData
 	if err := flvtag.DecodeVideoData(payload, &video); err != nil {
 		return err
 	}
-	buf := new(bytes.Buffer)
-	if err := flvtag.EncodeVideoData(buf, &video); err != nil {
-		return err
-	}
 	h.session.noteIngestPacket(time.Now().UTC())
-	return h.stream.Write(6, timestamp, &rtmpmsg.VideoMessage{Payload: buf})
+	return h.encoder.Encode(&flvtag.FlvTag{
+		TagType:   flvtag.TagTypeVideo,
+		Timestamp: timestamp,
+		Data:      &video,
+	})
 }
 
 func (h *gatewayIngestHandler) OnClose() {
-	if h.stream != nil {
-		_ = h.stream.Close()
-	}
-	if h.client != nil {
-		_ = h.client.Close()
+	if h.writer != nil {
+		_ = h.writer.Close()
 	}
 	if h.session != nil {
 		h.session.notePublisherDisconnected("publisher_disconnected")
@@ -154,38 +154,15 @@ func (h *gatewayIngestHandler) OnClose() {
 	}
 }
 
-func dialInternalPublish(rt *sessionRuntime) (*rtmp.ClientConn, *rtmp.Stream, error) {
-	addr := net.JoinHostPort("127.0.0.1", itoa(rt.rec.RTMPPort))
-	client, err := rtmp.Dial("rtmp", addr, &rtmp.ConnConfig{})
+func openIngestPipe(rt *sessionRuntime) (io.WriteCloser, *flv.Encoder, error) {
+	f, err := os.OpenFile(rt.rec.IngestPipePath, os.O_WRONLY, os.ModeNamedPipe)
 	if err != nil {
 		return nil, nil, err
 	}
-	connect := &rtmpmsg.NetConnectionConnect{
-		Command: rtmpmsg.NetConnectionConnectCommand{
-			App:           "live",
-			TCURL:         "rtmp://" + addr + "/live",
-			FlashVer:      "live-runner-shared-ingest",
-			Capabilities:  15,
-			AudioCodecs:   4071,
-			VideoCodecs:   252,
-			VideoFunction: 1,
-		},
-	}
-	if err := client.Connect(connect); err != nil {
-		_ = client.Close()
-		return nil, nil, err
-	}
-	stream, err := client.CreateStream(nil, 128)
+	enc, err := flv.NewEncoder(f, flv.FlagsAudio|flv.FlagsVideo)
 	if err != nil {
-		_ = client.Close()
+		_ = f.Close()
 		return nil, nil, err
 	}
-	if err := stream.Publish(&rtmpmsg.NetStreamPublish{
-		PublishingName: rt.rec.StreamKey,
-		PublishingType: "live",
-	}); err != nil {
-		_ = client.Close()
-		return nil, nil, err
-	}
-	return client, stream, nil
+	return f, enc, nil
 }

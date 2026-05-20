@@ -123,6 +123,9 @@ func syncOutputTree(ctx context.Context, rt *sessionRuntime, target *syncTarget,
 		if info.IsDir() {
 			return nil
 		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
 		rel, err := filepath.Rel(rt.rec.OutputDir, path)
 		if err != nil {
 			return err

@@ -203,6 +203,7 @@ type sessionRecord struct {
 	PrivateIngestURL string
 	StreamKey        string
 	HLSURL           string
+	IngestPipePath   string
 	RTMPPort         int
 	CreatedAt        time.Time
 	StartedAt        time.Time

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	transcode "github.com/Cloud-SPE/livepeer-modules-transcode-runners/transcode-core"
@@ -28,15 +29,24 @@ func buildRuntimePlan(cfg config, rec sessionRecord, hw transcode.HWProfile) (bu
 		}
 	}
 
-	listenHost := cfg.RTMPListenHost
+	inputURL := ""
 	if rec.Mode == modeGatewayIngest {
-		listenHost = "127.0.0.1"
+		if err := os.RemoveAll(rec.IngestPipePath); err != nil {
+			return buildRuntime{}, err
+		}
+		if err := syscall.Mkfifo(rec.IngestPipePath, 0o644); err != nil {
+			return buildRuntime{}, err
+		}
+		inputURL = rec.IngestPipePath
+	} else {
+		listenHost := cfg.RTMPListenHost
+		listenURL := fmt.Sprintf("rtmp://%s:%d/live/%s", listenHost, rec.RTMPPort, rec.StreamKey)
+		inputURL = listenURL
 	}
-	listenURL := fmt.Sprintf("rtmp://%s:%d/live/%s", listenHost, rec.RTMPPort, rec.StreamKey)
-	args := buildLiveFFmpegArgs(listenURL, rec.OutputDir, rec.Preset, hw, cfg.HLSWindowSegments)
+	args := buildLiveFFmpegArgs(inputURL, rec.Mode, rec.OutputDir, rec.Preset, hw, cfg.HLSWindowSegments)
 	return buildRuntime{
 		Args:      args,
-		ListenURL: listenURL,
+		ListenURL: inputURL,
 		OutputDir: rec.OutputDir,
 		MasterURL: rec.HLSURL,
 		UsageUnit: "output_seconds",
@@ -114,12 +124,16 @@ func startFFmpeg(rt *sessionRuntime, plan buildRuntime, hw transcode.HWProfile) 
 		rt.event("session.ended", rt.lastUsageTotal.Load(), 0, "completed", nil)
 	}()
 
-	if err := waitForRTMPReady(rt.cfg, rt.rec.RTMPPort, rt.cfg.SessionReadyTimeout); err != nil {
-		cancel()
-		<-rt.ffmpegDone
-		return err
+	if rt.rec.Mode == modeLocalHLSServe {
+		if err := waitForRTMPReady(rt.cfg, rt.rec.RTMPPort, rt.cfg.SessionReadyTimeout); err != nil {
+			cancel()
+			<-rt.ffmpegDone
+			return err
+		}
+		rt.setListenerBound(true)
+	} else {
+		rt.setListenerBound(true)
 	}
-	rt.setListenerBound(true)
 	return nil
 }
 
@@ -225,13 +239,16 @@ func (t *logTail) join() string {
 	return strings.Join(ordered, " | ")
 }
 
-func buildLiveFFmpegArgs(listenURL, outputDir string, preset transcode.ABRPreset, hw transcode.HWProfile, window int) []string {
+func buildLiveFFmpegArgs(inputURL string, mode sessionMode, outputDir string, preset transcode.ABRPreset, hw transcode.HWProfile, window int) []string {
 	args := []string{
 		"-y",
 		"-fflags", "+nobuffer",
 		"-flags", "+low_delay",
-		"-listen", "1",
-		"-i", listenURL,
+	}
+	if mode == modeLocalHLSServe {
+		args = append(args, "-listen", "1", "-i", inputURL)
+	} else {
+		args = append(args, "-f", "flv", "-i", inputURL)
 	}
 
 	videoCount := 0
