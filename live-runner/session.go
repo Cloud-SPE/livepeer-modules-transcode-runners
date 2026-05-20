@@ -31,6 +31,8 @@ type sessionRuntime struct {
 	lastHeartbeatAt atomic.Int64
 	lastEventTime   atomic.Int64
 	terminating     atomic.Bool
+	publishStopped  atomic.Bool
+	uploadFailed    atomic.Bool
 }
 
 func newSessionRuntime(cfg config, req liveSessionRequest, preset transcodePreset, port int, callbacks *callbackClient, metrics *runnerMetrics) (*sessionRuntime, error) {
@@ -295,6 +297,28 @@ func (rt *sessionRuntime) event(eventType string, usageTotal, usageDelta uint64,
 	rt.callbacks.send(context.Background(), rt.rec.Callbacks, env)
 }
 
+func (rt *sessionRuntime) emitPublishStopped(reason string, details map[string]any) {
+	if !rt.publishStopped.CompareAndSwap(false, true) {
+		return
+	}
+	rt.event("session.publish_stopped", rt.lastUsageTotal.Load(), 0, reason, details)
+}
+
+func (rt *sessionRuntime) resetPublishStoppedEvent() {
+	rt.publishStopped.Store(false)
+}
+
+func (rt *sessionRuntime) emitUploadFailed(details map[string]any) {
+	if !rt.uploadFailed.CompareAndSwap(false, true) {
+		return
+	}
+	rt.event("session.upload.failed", rt.lastUsageTotal.Load(), 0, "", details)
+}
+
+func (rt *sessionRuntime) clearUploadFailure() {
+	rt.uploadFailed.Store(false)
+}
+
 func eventID(kind, sessionID string, seq uint64) string {
 	return kind + "_" + sessionID + "_" + itoa64(seq)
 }
@@ -417,6 +441,7 @@ func (rt *sessionRuntime) notePublisherAccepted() {
 	rt.rec.Ingest.Authenticated = true
 	rt.rec.Ingest.ConnectedPublisher = true
 	rt.mu.Unlock()
+	rt.resetPublishStoppedEvent()
 }
 
 func (rt *sessionRuntime) noteIngestPacket(now time.Time) {

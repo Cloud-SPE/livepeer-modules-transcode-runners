@@ -282,7 +282,7 @@ func (s *server) run(ctx context.Context) error {
 				for _, rt := range s.store.snapshot() {
 					if err := rt.watchdog(s.cfg.SessionNoPublishTTL); err != nil {
 						log.Printf("[live %s] watchdog: %v", rt.rec.RunnerSessionID, err)
-						rt.event("session.publish_stopped", rt.lastUsageTotal.Load(), 0, rt.rec.CloseReason, map[string]any{"reason": rt.rec.CloseReason})
+						rt.emitPublishStopped(rt.rec.CloseReason, map[string]any{"reason": rt.rec.CloseReason})
 						if rt.rec.State == stateFailed {
 							rt.event("session.failed", rt.lastUsageTotal.Load(), 0, rt.rec.CloseReason, map[string]any{"reason": rt.rec.CloseReason})
 						}

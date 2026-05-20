@@ -3,6 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -105,4 +109,94 @@ func TestSharedIngestPortDefault(t *testing.T) {
 	if got := cfg.sharedIngestPort(); got != "1935" {
 		t.Fatalf("port=%q", got)
 	}
+}
+
+func TestEmitPublishStoppedIsDeduplicatedUntilPublisherReturns(t *testing.T) {
+	events, closeFn := newEventCollector(t)
+	defer closeFn()
+
+	rt := &sessionRuntime{
+		rec: sessionRecord{
+			RunnerSessionID: "rsess_test",
+			BrokerSessionID: "bsess_test",
+			Callbacks: brokerCallbackConfig{
+				EventURL: events.server.URL,
+			},
+		},
+		callbacks: &callbackClient{httpClient: events.client},
+	}
+
+	rt.emitPublishStopped("publisher_disconnected", nil)
+	rt.emitPublishStopped("publisher_disconnected", nil)
+	waitForEventCount(t, events, "session.publish_stopped", 1)
+
+	rt.notePublisherAccepted()
+	rt.emitPublishStopped("publisher_disconnected", nil)
+	waitForEventCount(t, events, "session.publish_stopped", 2)
+}
+
+func TestEmitUploadFailedIsDeduplicatedUntilRecovery(t *testing.T) {
+	events, closeFn := newEventCollector(t)
+	defer closeFn()
+
+	rt := &sessionRuntime{
+		rec: sessionRecord{
+			RunnerSessionID: "rsess_test",
+			BrokerSessionID: "bsess_test",
+			Callbacks: brokerCallbackConfig{
+				EventURL: events.server.URL,
+			},
+		},
+		callbacks: &callbackClient{httpClient: events.client},
+	}
+
+	rt.emitUploadFailed(map[string]any{"error_text": "boom"})
+	rt.emitUploadFailed(map[string]any{"error_text": "boom"})
+	waitForEventCount(t, events, "session.upload.failed", 1)
+
+	rt.clearUploadFailure()
+	rt.emitUploadFailed(map[string]any{"error_text": "boom"})
+	waitForEventCount(t, events, "session.upload.failed", 2)
+}
+
+type collectedEvents struct {
+	client *http.Client
+	server *httptest.Server
+	mu     sync.Mutex
+	types  []string
+}
+
+func newEventCollector(t *testing.T) (*collectedEvents, func()) {
+	t.Helper()
+	c := &collectedEvents{}
+	c.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var env eventEnvelope
+		if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
+			t.Errorf("decode event: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		c.mu.Lock()
+		c.types = append(c.types, env.EventType)
+		c.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	c.client = c.server.Client()
+	return c, func() { c.server.Close() }
+}
+
+func waitForEventCount(t *testing.T, c *collectedEvents, eventType string, want int) {
+	t.Helper()
+	waitForCondition(t, 2*time.Second, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		count := 0
+		for _, got := range c.types {
+			if got == eventType {
+				count++
+			}
+		}
+		return count == want
+	})
 }

@@ -156,7 +156,7 @@ func (h *gatewayIngestHandler) OnClose() {
 	}
 	if h.session != nil {
 		h.session.notePublisherDisconnected("publisher_disconnected")
-		h.session.event("session.publish_stopped", h.session.lastUsageTotal.Load(), 0, "publisher_disconnected", nil)
+		h.session.emitPublishStopped("publisher_disconnected", nil)
 	}
 }
 
