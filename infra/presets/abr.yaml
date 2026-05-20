@@ -1,0 +1,60 @@
+presets:
+  - name: abr-standard
+    description: "Standard 4-rung HLS ABR ladder"
+    type: abr
+    format: hls
+    hls_mode: fmp4_single_file
+    segment_duration: 6
+    renditions:
+      - name: "1080p"
+        video:
+          codec: h264
+          width: 1920
+          height: 1080
+          bitrate: "5M"
+          max_bitrate: "7.5M"
+          profile: high
+          level: "4.1"
+        audio:
+          codec: aac
+          bitrate: "128k"
+          channels: 2
+      - name: "720p"
+        video:
+          codec: h264
+          width: 1280
+          height: 720
+          bitrate: "2.5M"
+          max_bitrate: "3.75M"
+          profile: high
+          level: "3.1"
+        audio:
+          codec: aac
+          bitrate: "96k"
+          channels: 2
+      - name: "480p"
+        video:
+          codec: h264
+          width: 854
+          height: 480
+          bitrate: "1M"
+          max_bitrate: "1.5M"
+          profile: main
+          level: "3.1"
+        audio:
+          codec: aac
+          bitrate: "96k"
+          channels: 2
+      - name: "360p"
+        video:
+          codec: h264
+          width: 640
+          height: 360
+          bitrate: "600k"
+          max_bitrate: "900k"
+          profile: main
+          level: "3.1"
+        audio:
+          codec: aac
+          bitrate: "64k"
+          channels: 2

@@ -1,0 +1,16 @@
+capability: video-transcode-abr
+description: |
+  Multi-rendition ABR ladder runner. Produces HLS-oriented adaptive bitrate
+  outputs with per-rendition upload URLs and caller-polled job status.
+
+offerings:
+  - name: transcode-abr
+    description: ABR ladder transcode
+    methods:
+      - POST /v1/video/transcode/abr
+    status_method:
+      - POST /v1/video/transcode/abr/status
+    presets_method:
+      - GET /v1/video/transcode/abr/presets
+    rate_card_hints:
+      unit: video_seconds

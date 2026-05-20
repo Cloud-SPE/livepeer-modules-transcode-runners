@@ -1,0 +1,78 @@
+services:
+  transcode_runner:
+    image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v1.3.0}
+    container_name: ${TRANSCODE_CONTAINER_NAME:-transcode-runner}
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      RUNNER_ADDR: :8080
+      MAX_QUEUE_SIZE: ${TRANSCODE_MAX_QUEUE_SIZE:-2}
+      TEMP_DIR: /tmp/transcode
+      JOB_TTL_SECONDS: ${TRANSCODE_JOB_TTL_SECONDS:-3600}
+      PRESETS_FILE: /etc/runner/presets/${TRANSCODE_PRESETS_FILE:-nvidia-gtx1080-transcode.yaml}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,video,utility}
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - transcode-temp:/tmp/transcode
+    ports:
+      - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-10m}
+        max-file: ${LOG_MAX_FILE:-5}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${NVIDIA_DEVICE_COUNT:-1}
+              capabilities: [gpu]
+
+  abr_runner:
+    image: ${REGISTRY:-tztcloud}/abr-runner-nvidia:${TAG:-v1.3.0}
+    container_name: ${ABR_CONTAINER_NAME:-abr-runner}
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      RUNNER_ADDR: :8080
+      MAX_QUEUE_SIZE: ${ABR_MAX_QUEUE_SIZE:-1}
+      TEMP_DIR: /tmp/abr
+      JOB_TTL_SECONDS: ${ABR_JOB_TTL_SECONDS:-3600}
+      PRESETS_FILE: /etc/runner/presets/${ABR_PRESETS_FILE:-nvidia-gtx1080-abr.yaml}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,video,utility}
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - abr-temp:/tmp/abr
+    ports:
+      - "${ABR_RUNNER_PORT:-8087}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-10m}
+        max-file: ${LOG_MAX_FILE:-5}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${NVIDIA_DEVICE_COUNT:-1}
+              capabilities: [gpu]
+
+volumes:
+  transcode-temp: {}
+  abr-temp: {}

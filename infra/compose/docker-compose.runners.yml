@@ -1,0 +1,104 @@
+services:
+  transcode_runner_amd:
+    image: ${REGISTRY:-tztcloud}/transcode-runner-amd:${TAG:-v1.3.0}
+    profiles: ["amd"]
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - RUNNER_ADDR=:8080
+      - MAX_QUEUE_SIZE=5
+      - TEMP_DIR=/tmp/transcode
+      - JOB_TTL_SECONDS=3600
+      - PRESETS_FILE=/etc/runner/presets/transcode.yaml
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - transcode-temp:/tmp/transcode
+    ports:
+      - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
+
+  abr_runner_amd:
+    image: ${REGISTRY:-tztcloud}/abr-runner-amd:${TAG:-v1.3.0}
+    profiles: ["amd"]
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - RUNNER_ADDR=:8080
+      - MAX_QUEUE_SIZE=2
+      - TEMP_DIR=/tmp/abr
+      - JOB_TTL_SECONDS=3600
+      - PRESETS_FILE=/etc/runner/presets/abr.yaml
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - abr-temp:/tmp/abr
+    ports:
+      - "${ABR_RUNNER_PORT:-8087}:8080"
+
+  transcode_runner_intel:
+    image: ${REGISTRY:-tztcloud}/transcode-runner-intel:${TAG:-v1.3.0}
+    profiles: ["intel"]
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - RUNNER_ADDR=:8080
+      - MAX_QUEUE_SIZE=5
+      - TEMP_DIR=/tmp/transcode
+      - JOB_TTL_SECONDS=3600
+      - PRESETS_FILE=/etc/runner/presets/transcode.yaml
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - transcode-temp:/tmp/transcode
+    ports:
+      - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
+
+  abr_runner_intel:
+    image: ${REGISTRY:-tztcloud}/abr-runner-intel:${TAG:-v1.3.0}
+    profiles: ["intel"]
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - RUNNER_ADDR=:8080
+      - MAX_QUEUE_SIZE=2
+      - TEMP_DIR=/tmp/abr
+      - JOB_TTL_SECONDS=3600
+      - PRESETS_FILE=/etc/runner/presets/abr.yaml
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - abr-temp:/tmp/abr
+    ports:
+      - "${ABR_RUNNER_PORT:-8087}:8080"
+
+  transcode_runner_nvidia:
+    image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v1.3.0}
+    profiles: ["nvidia"]
+    runtime: nvidia
+    environment:
+      - RUNNER_ADDR=:8080
+      - MAX_QUEUE_SIZE=5
+      - TEMP_DIR=/tmp/transcode
+      - JOB_TTL_SECONDS=3600
+      - PRESETS_FILE=/etc/runner/presets/transcode.yaml
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - transcode-temp:/tmp/transcode
+    ports:
+      - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
+
+  abr_runner_nvidia:
+    image: ${REGISTRY:-tztcloud}/abr-runner-nvidia:${TAG:-v1.3.0}
+    profiles: ["nvidia"]
+    runtime: nvidia
+    environment:
+      - RUNNER_ADDR=:8080
+      - MAX_QUEUE_SIZE=2
+      - TEMP_DIR=/tmp/abr
+      - JOB_TTL_SECONDS=3600
+      - PRESETS_FILE=/etc/runner/presets/abr.yaml
+    volumes:
+      - ../presets:/etc/runner/presets:ro
+      - abr-temp:/tmp/abr
+    ports:
+      - "${ABR_RUNNER_PORT:-8087}:8080"
+
+volumes:
+  transcode-temp: {}
+  abr-temp: {}

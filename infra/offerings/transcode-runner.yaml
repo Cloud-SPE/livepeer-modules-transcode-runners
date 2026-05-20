@@ -1,0 +1,17 @@
+capability: video-transcode
+description: |
+  Single-rendition VOD transcode runner. Supports hardware-accelerated H.264,
+  HEVC, and AV1 transcodes plus subtitle, watermark, thumbnail, and tone-map
+  flows supported by the shared FFmpeg pipeline.
+
+offerings:
+  - name: transcode-vod
+    description: Single-rendition video transcode
+    methods:
+      - POST /v1/video/transcode
+    status_method:
+      - POST /v1/video/transcode/status
+    presets_method:
+      - GET /v1/video/transcode/presets
+    rate_card_hints:
+      unit: video_seconds
