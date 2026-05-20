@@ -99,3 +99,10 @@ func TestStaleRemoteFilesDeletesOnlySegments(t *testing.T) {
 		t.Fatalf("stale=%v", stale)
 	}
 }
+
+func TestSharedIngestPortDefault(t *testing.T) {
+	cfg := config{SharedIngestAddr: ":1935"}
+	if got := cfg.sharedIngestPort(); got != "1935" {
+		t.Fatalf("port=%q", got)
+	}
+}

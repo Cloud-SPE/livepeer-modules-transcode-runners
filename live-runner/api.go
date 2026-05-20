@@ -261,6 +261,15 @@ func (s *server) run(ctx context.Context) error {
 		Addr:    s.cfg.RunnerAddr,
 		Handler: s.routes(),
 	}
+	sharedIngest, err := startSharedIngest(s.store, s.metrics, s.cfg.SharedIngestAddr)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if sharedIngest != nil {
+			_ = sharedIngest.Close()
+		}
+	}()
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -289,6 +298,9 @@ func (s *server) run(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
+		if sharedIngest != nil {
+			_ = sharedIngest.Close()
+		}
 		_ = httpSrv.Shutdown(context.Background())
 		for _, rt := range s.store.snapshot() {
 			rt.stop("runner_shutdown")

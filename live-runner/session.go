@@ -84,7 +84,7 @@ func newSessionRuntime(cfg config, req liveSessionRequest, preset transcodePrese
 		rec.IdleTimeout = time.Duration(req.SessionParams.IdleTimeoutSeconds) * time.Second
 	}
 	rec.RTMPURL = "rtmp://" + cfg.RTMPHost + ":" + itoa(port) + "/live"
-	rec.PrivateIngestURL = "rtmp://" + cfg.IngestPublicHost + ":" + itoa(port) + "/live/" + streamKey
+	rec.PrivateIngestURL = "rtmp://" + cfg.IngestPublicHost + ":" + cfg.sharedIngestPort() + "/live/" + streamKey
 	rec.OutputDir = cfg.TempDir + "/" + sessionID
 	if mode == modeLocalHLSServe {
 		rec.HLSURL = cfg.HLSBasePath + "/" + sessionID + "/master.m3u8"
@@ -364,6 +364,7 @@ func (rt *sessionRuntime) recordOutputPut(name string, when time.Time) {
 	if rt.metrics != nil {
 		rt.metrics.outputCredentialPutSuccess.Add(1)
 	}
+	rt.rec.Output.ConsecutiveFailures = 0
 	rt.rec.Output.LastPutError = ""
 	switch {
 	case strings.HasSuffix(name, ".m3u8"):
@@ -382,7 +383,42 @@ func (rt *sessionRuntime) recordOutputError(err error) {
 	if rt.metrics != nil {
 		rt.metrics.outputCredentialPutFailure.Add(1)
 	}
+	rt.rec.Output.ConsecutiveFailures++
 	rt.rec.Output.LastPutError = err.Error()
+	rt.mu.Unlock()
+}
+
+func (rt *sessionRuntime) outputFailureCount() uint64 {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.rec.Output.ConsecutiveFailures
+}
+
+func (rt *sessionRuntime) noteIngestRejected() {
+	if rt.metrics != nil {
+		rt.metrics.ingestAuthenticationReject.Add(1)
+	}
+}
+
+func (rt *sessionRuntime) notePublisherDisconnected(reason string) {
+	rt.mu.Lock()
+	rt.rec.Ingest.ConnectedPublisher = false
+	if rt.rec.State == statePublishing {
+		rt.setState(stateStalled, reason)
+	}
+	rt.mu.Unlock()
+}
+
+func (rt *sessionRuntime) notePublisherAccepted() {
+	rt.mu.Lock()
+	rt.rec.Ingest.Authenticated = true
+	rt.rec.Ingest.ConnectedPublisher = true
+	rt.mu.Unlock()
+}
+
+func (rt *sessionRuntime) noteIngestPacket(now time.Time) {
+	rt.mu.Lock()
+	rt.rec.Ingest.LastPacketAt = now
 	rt.mu.Unlock()
 }
 

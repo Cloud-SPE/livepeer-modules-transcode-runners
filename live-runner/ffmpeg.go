@@ -28,7 +28,11 @@ func buildRuntimePlan(cfg config, rec sessionRecord, hw transcode.HWProfile) (bu
 		}
 	}
 
-	listenURL := fmt.Sprintf("rtmp://%s:%d/live/%s", cfg.RTMPListenHost, rec.RTMPPort, rec.StreamKey)
+	listenHost := cfg.RTMPListenHost
+	if rec.Mode == modeGatewayIngest {
+		listenHost = "127.0.0.1"
+	}
+	listenURL := fmt.Sprintf("rtmp://%s:%d/live/%s", listenHost, rec.RTMPPort, rec.StreamKey)
 	args := buildLiveFFmpegArgs(listenURL, rec.OutputDir, rec.Preset, hw, cfg.HLSWindowSegments)
 	return buildRuntime{
 		Args:      args,

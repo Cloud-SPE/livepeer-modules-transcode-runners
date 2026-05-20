@@ -10,12 +10,14 @@ type sessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*sessionRuntime
 	ports    map[int]string
+	streams  map[string]string
 }
 
 func newSessionStore() *sessionStore {
 	return &sessionStore{
 		sessions: make(map[string]*sessionRuntime),
 		ports:    make(map[int]string),
+		streams:  make(map[string]string),
 	}
 }
 
@@ -30,6 +32,9 @@ func (s *sessionStore) add(rt *sessionRuntime) error {
 	}
 	s.sessions[rt.rec.RunnerSessionID] = rt
 	s.ports[rt.rec.RTMPPort] = rt.rec.RunnerSessionID
+	if rt.rec.StreamKey != "" {
+		s.streams[rt.rec.StreamKey] = rt.rec.RunnerSessionID
+	}
 	return nil
 }
 
@@ -44,8 +49,19 @@ func (s *sessionStore) delete(id string) {
 	defer s.mu.Unlock()
 	if rt, ok := s.sessions[id]; ok {
 		delete(s.ports, rt.rec.RTMPPort)
+		delete(s.streams, rt.rec.StreamKey)
 		delete(s.sessions, id)
 	}
+}
+
+func (s *sessionStore) byStreamKey(streamKey string) *sessionRuntime {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.streams[streamKey]
+	if !ok {
+		return nil
+	}
+	return s.sessions[id]
 }
 
 func (s *sessionStore) nextPort(start, end int) (int, error) {

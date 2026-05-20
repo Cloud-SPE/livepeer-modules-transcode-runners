@@ -89,8 +89,20 @@ func watchAndUpload(ctx context.Context, rt *sessionRuntime, target *syncTarget)
 			sanitized := sanitizeUploadError(rt, err)
 			rt.recordOutputError(fmt.Errorf("%s", sanitized))
 			rt.event("session.upload.failed", rt.lastUsageTotal.Load(), 0, "", map[string]any{"error_text": sanitized})
+			if threshold := rt.cfg.OutputFailureThreshold; threshold > 0 && rt.outputFailureCount() >= uint64(threshold) {
+				rt.mu.Lock()
+				if rt.rec.State == statePublishing {
+					rt.setState(stateStalled, "output_sync_failed")
+				}
+				rt.mu.Unlock()
+			}
 		} else if ok && !healthy {
 			healthy = true
+			rt.mu.Lock()
+			if rt.rec.State == stateStalled && rt.rec.CloseReason == "output_sync_failed" {
+				rt.setState(statePublishing, "")
+			}
+			rt.mu.Unlock()
 			rt.event("session.upload.healthy", rt.lastUsageTotal.Load(), 0, "", nil)
 		}
 		select {

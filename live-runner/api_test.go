@@ -212,7 +212,7 @@ func TestCreateSessionGatewayIngestMode(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode create: %v", err)
 	}
-	if out.PrivateIngestURL != "rtmp://127.0.0.1:19350/live/gws_1234" {
+	if out.PrivateIngestURL != "rtmp://127.0.0.1:1935/live/gws_1234" {
 		t.Fatalf("private ingest url=%q", out.PrivateIngestURL)
 	}
 	if out.Media.Playback.HLSURL != "" {

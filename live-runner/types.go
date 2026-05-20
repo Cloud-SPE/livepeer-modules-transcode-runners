@@ -179,13 +179,14 @@ type liveIngestStatus struct {
 }
 
 type liveOutputStatus struct {
-	Mode              outputMode
-	TargetPrefix      string
-	LastManifestPutAt time.Time
-	LastSegmentPutAt  time.Time
-	PutSuccessCount   uint64
-	PutFailureCount   uint64
-	LastPutError      string
+	Mode                outputMode
+	TargetPrefix        string
+	LastManifestPutAt   time.Time
+	LastSegmentPutAt    time.Time
+	PutSuccessCount     uint64
+	PutFailureCount     uint64
+	ConsecutiveFailures uint64
+	LastPutError        string
 }
 
 type sessionRecord struct {
