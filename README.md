@@ -12,7 +12,7 @@ images for NVIDIA, Intel, and AMD, and direct-runner smoke tooling.
 |---|---|---|
 | `transcode-runner-nvidia` / `-intel` / `-amd` | Single-rendition VOD transcode | `POST /v1/video/transcode` |
 | `abr-runner-nvidia` / `-intel` / `-amd` | Multi-rendition ABR ladder transcode | `POST /v1/video/transcode/abr` |
-| `live-runner-nvidia` / `-intel` / `-amd` | Remote live RTMP ingest + HLS session runtime | `POST /v1/video/live/sessions` |
+| `live-runner-nvidia` / `-intel` / `-amd` | Live session runner for remote RTMP or gateway-ingest modes | `POST /v1/video/live/sessions` |
 | `transcode-tester` | Node integration smoke harness | n/a |
 
 Shared code lives in [`transcode-core/`](./transcode-core). Build and runtime
@@ -52,6 +52,19 @@ and
 [`infra/presets/nvidia-gtx1080-abr.yaml`](./infra/presets/nvidia-gtx1080-abr.yaml).
 The live runner uses [`infra/presets/live.yaml`](./infra/presets/live.yaml) by
 default.
+
+## Live runner modes
+
+`live-runner` now supports two session shapes behind the same control API:
+
+- local-HLS mode: per-session RTMP ingest on an allocated port range and local
+  HLS serving from `/_hls/...`
+- gateway-ingest mode: shared RTMP ingest on one port, direct FFmpeg ingest
+  through a local FIFO, and HLS upload to caller-supplied S3-compatible
+  storage
+
+Gateway-ingest mode is selected per session when the broker includes
+`output_credential` and `ingest_accept.stream_key` in the session-open request.
 
 ## Repo layout
 

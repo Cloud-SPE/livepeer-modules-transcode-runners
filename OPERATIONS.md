@@ -66,12 +66,28 @@ If you need best-effort development behavior, you can explicitly set `GPU_STRICT
 
 Key runtime knobs:
 
-- `PUBLIC_HOST` — external HTTP host:port returned in HLS playback URLs
-- `RTMP_PUBLIC_HOST` — external host returned in RTMP ingest URLs
-- `RTMP_PORT_START` / `RTMP_PORT_END` — per-session RTMP listen port pool
+- `PUBLIC_HOST` — external HTTP host:port returned in local-HLS playback URLs
+- `PUBLIC_URL_SCHEME` — optional `http` / `https` override for generated local-HLS playback URLs
+- `RTMP_PUBLIC_HOST` — external host returned in local-HLS RTMP ingest URLs
+- `RUNNER_INGEST_PUBLIC_HOST` — host returned in gateway-ingest `private_ingest_url`
+- `RUNNER_SHARED_INGEST_ADDR` — shared RTMP ingest bind address for gateway-ingest mode, default `:1935`
+- `RTMP_PORT_START` / `RTMP_PORT_END` — per-session RTMP listen port pool for local-HLS mode
 - `SESSION_NO_PUBLISH_TTL` — max wait for first RTMP publish
 - `SESSION_IDLE_TTL` — max stall window after publishing starts
+- `OUTPUT_SYNC_INTERVAL` — cadence for gateway-ingest S3 sync polling
+- `OUTPUT_FAILURE_THRESHOLD` — consecutive uploader failures before a publishing session stalls
 - `BROKER_AUTH_TOKEN` — optional bearer token required on the control API
 
-The live compose overlays map the full RTMP port range so sessions can bind
-dedicated ports without a separate RTMP edge process.
+Ingress topology depends on mode:
+
+- local-HLS mode maps the full RTMP port range so sessions can bind dedicated
+  listeners without a separate RTMP edge process
+- gateway-ingest mode binds one shared RTMP ingress port, authenticates by
+  `ingest_accept.stream_key`, and uploads HLS output to the caller-supplied
+  S3-compatible target
+
+Operators who need both modes should expose:
+
+- the HTTP control/HLS port
+- the shared RTMP ingress port, typically `1935`
+- the per-session RTMP range if local-HLS mode is still in use

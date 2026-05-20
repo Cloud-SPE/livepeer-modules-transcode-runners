@@ -81,9 +81,12 @@ services:
     environment:
       RUNNER_ADDR: :8080
       PUBLIC_HOST: ${LIVE_PUBLIC_HOST:-localhost:${LIVE_RUNNER_PORT:-8088}}
+      PUBLIC_URL_SCHEME: ${LIVE_PUBLIC_URL_SCHEME:-http}
       TEMP_DIR: /tmp/live
       PRESETS_FILE: /etc/runner/presets/${LIVE_PRESETS_FILE:-live.yaml}
       RTMP_PUBLIC_HOST: ${LIVE_RTMP_PUBLIC_HOST:-localhost}
+      RUNNER_INGEST_PUBLIC_HOST: ${LIVE_INGEST_PUBLIC_HOST:-${LIVE_RTMP_PUBLIC_HOST:-localhost}}
+      RUNNER_SHARED_INGEST_ADDR: :1935
       RTMP_LISTEN_HOST: 0.0.0.0
       RTMP_PORT_START: ${LIVE_RTMP_PORT_START:-19350}
       RTMP_PORT_END: ${LIVE_RTMP_PORT_END:-19449}
@@ -94,6 +97,7 @@ services:
       - live-temp:/tmp/live
     ports:
       - "${LIVE_RUNNER_PORT:-8088}:8080"
+      - "${LIVE_SHARED_INGEST_PORT:-1935}:1935"
       - "${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}:${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]

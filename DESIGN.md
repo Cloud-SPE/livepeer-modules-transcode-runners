@@ -5,7 +5,7 @@ and live video workloads:
 
 - `transcode-runner` handles single-rendition transcode jobs
 - `abr-runner` handles multi-rendition ABR ladder jobs
-- `live-runner` handles remote live RTMP ingest + HLS session work
+- `live-runner` handles live RTMP ingest and session-oriented HLS output work
 
 Both binaries import the shared `transcode-core` package, which owns:
 
@@ -31,10 +31,12 @@ The broker or any compatible upstream submits a job over HTTP. The runner:
 For `live-runner`, the shape is session-oriented instead:
 
 1. broker creates a runner session over HTTP
-2. runner allocates per-session RTMP ingest coordinates
+2. runner selects one of two ingest modes:
+   - per-session RTMP listener + local HLS serve
+   - shared RTMP ingest + S3 push
 3. runner starts an FFmpeg live HLS runtime
-4. publisher pushes RTMP to the runner-owned media plane
-5. runner emits heartbeat and usage events back to the broker
+4. publisher or gateway pushes RTMP into the runner ingest plane
+5. runner emits heartbeat, publish, upload, and usage events back to the broker
 6. broker closes the runner session over HTTP when the live session ends
 
 Job state is in-memory only. Restarts lose active and historical job state.
@@ -54,9 +56,11 @@ Each runner image then adds only:
 - the temp dir
 - a non-root runtime user
 
-`live-runner` keeps session state in memory and per-session HLS output on local
-scratch. It remains blind to customer identity and billing state; the broker is
-still the payment and session authority.
+`live-runner` keeps session state in memory and per-session scratch on local
+disk. In local-HLS mode it serves HLS from local scratch; in gateway-ingest
+mode it uploads HLS artifacts to caller-supplied S3-compatible storage. It
+remains blind to customer identity and billing state; the broker is still the
+payment and session authority.
 
 ## Clean-slate constraints
 
