@@ -43,6 +43,15 @@ Key environment overrides:
 - `GO_VERSION` default `1.25.7`
 - `NODE_VERSION` default `22`
 
+Runner images also embed startup build metadata:
+
+- `version`
+- `commit`
+- `build time`
+
+Those fields are stamped through linker flags during `./build-images.sh build` and
+show up in runner startup logs.
+
 ## CUDA 13 note
 
 The NVIDIA build targets CUDA `13.2.1`.

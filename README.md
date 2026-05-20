@@ -82,6 +82,12 @@ All three vendor families are in scope:
 - Intel QSV / VAAPI
 - AMD VAAPI
 
+Strict hardware mode is the default policy across vendors:
+
+- jobs fail closed when the requested path would require CPU-only processing
+- startup filters presets against the actual usable hardware/runtime path
+- visible GPU hardware is not enough; the runner requires a working decode+encode runtime path
+
 Current NVIDIA build note:
 
 - CUDA `13.2.1` is supported

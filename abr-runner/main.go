@@ -874,12 +874,12 @@ func main() {
 		log.Printf("  Decoders: %s", strings.Join(hw.Decoders, ", "))
 		log.Printf("  HW Accels: %s", strings.Join(hw.HWAccels, ", "))
 		if hw.MaxSessions > 0 {
-			log.Printf("  Max concurrent sessions: %d", hw.MaxSessions)
+			log.Printf("  Estimated max concurrent sessions: %d", hw.MaxSessions)
 		} else {
-			log.Printf("  Max concurrent sessions: unlimited")
+			log.Printf("  Estimated max concurrent sessions: unlimited")
 		}
 	} else {
-		log.Println("WARNING: No GPU detected — only software encoding will be available")
+		log.Println("WARNING: No usable GPU runtime detected — strict GPU mode will disable all GPU-bound presets")
 		for _, msg := range report.Messages {
 			log.Printf("  GPU detection: %s", msg)
 		}

@@ -16,7 +16,8 @@ NVIDIA health on the host matters before the runner does:
 
 - `nvidia-smi` should work on the host
 - Docker GPU injection should work for a trivial CUDA container before testing runner jobs
-- if host driver and user-space libraries are mismatched, the NVIDIA runner image will still start, but it will fall back to software-only preset filtering
+- if host driver and user-space libraries are mismatched, the NVIDIA runner image will still start, but strict GPU mode will mark the runtime unusable and disable all GPU-bound presets
+- startup now logs the exact GPU detection failure reason, including runtime sanity-check failures
 
 On a GTX 1080 specifically:
 
@@ -39,6 +40,17 @@ Set:
 - `PRESETS_FILE=/etc/runner/presets/abr.yaml` for `abr-runner`
 
 If unset, each runner falls back to its embedded preset file.
+
+## Strict GPU mode
+
+- `GPU_STRICT` defaults to `true` on all vendors
+- strict mode rejects request features that currently require CPU-side processing:
+  - subtitle burn-in
+  - watermark overlay
+  - thumbnail extraction
+- strict mode also rejects jobs when hardware decode for the input codec or hardware encode for the output codec is unavailable
+
+If you need best-effort development behavior, you can explicitly set `GPU_STRICT=false`, but that is not the production default.
 
 ## State and storage
 

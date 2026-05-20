@@ -30,3 +30,5 @@
 - Request bodies are JSON
 - Upload and download URLs are caller-provided
 - Webhook callbacks remain supported by the source runner code
+- `webhook_url` is caller-supplied per job request; the runner does not derive it from env
+- in containerized deployments, `localhost` in `webhook_url` points at the runner container itself
