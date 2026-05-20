@@ -69,3 +69,33 @@ func TestScanCRLFSplitsProgressLines(t *testing.T) {
 		t.Fatalf("tokens=%q", got)
 	}
 }
+
+func TestRedactSecrets(t *testing.T) {
+	got := redactSecrets("rtmp://host/live/secret1234 token", "secret1234")
+	if got != "rtmp://host/live/[redacted:1234] token" {
+		t.Fatalf("redacted=%q", got)
+	}
+}
+
+func TestStaleRemoteFilesDeletesOnlySegments(t *testing.T) {
+	remote := map[string]struct{}{
+		"master.m3u8":      {},
+		"v0/playlist.m3u8": {},
+		"v0/seg0.ts":       {},
+		"v0/seg1.ts":       {},
+		"v0/init.mp4":      {},
+	}
+	present := map[string]struct{}{
+		"master.m3u8":      {},
+		"v0/playlist.m3u8": {},
+		"v0/seg1.ts":       {},
+		"v0/init.mp4":      {},
+	}
+	stale, err := staleRemoteFiles(remote, present)
+	if err != nil {
+		t.Fatalf("staleRemoteFiles: %v", err)
+	}
+	if len(stale) != 1 || stale[0] != "v0/seg0.ts" {
+		t.Fatalf("stale=%v", stale)
+	}
+}

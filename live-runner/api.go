@@ -24,6 +24,7 @@ type server struct {
 	callbacks *callbackClient
 	hw        transcode.HWProfile
 	presets   []transcode.ABRPreset
+	metrics   *runnerMetrics
 }
 
 func newServer(cfg config) (*server, error) {
@@ -48,6 +49,7 @@ func newServer(cfg config) (*server, error) {
 		callbacks: newCallbackClient(cfg.CallbackTimeout),
 		hw:        transcode.DetectGPU(),
 		presets:   presets,
+		metrics:   newRunnerMetrics(),
 	}, nil
 }
 
@@ -76,11 +78,29 @@ func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	sessions := s.store.snapshot()
+	ready := 0
+	publishing := 0
+	stalled := 0
+	for _, rt := range sessions {
+		switch rt.rec.State {
+		case stateReady:
+			ready++
+		case statePublishing:
+			publishing++
+		case stateStalled:
+			stalled++
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":       true,
-		"build":    transcode.BuildSummary("live-runner"),
-		"gpu":      s.hw.GPUName,
-		"sessions": len(s.store.snapshot()),
+		"ok":               true,
+		"build":            transcode.BuildSummary("live-runner"),
+		"gpu":              s.hw.GPUName,
+		"sessions":         len(sessions),
+		"sessions_ready":   ready,
+		"sessions_live":    publishing,
+		"sessions_stalled": stalled,
+		"metrics":          s.metrics.snapshot(),
 	})
 }
 
@@ -100,7 +120,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return
 	}
-	rt, err := newSessionRuntime(s.cfg, req, preset, port, s.callbacks)
+	rt, err := newSessionRuntime(s.cfg, req, preset, port, s.callbacks, s.metrics)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -119,17 +139,27 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	if err := startOutputSync(rt); err != nil {
+		rt.stop("output_sync_init_failed")
+		s.store.delete(rt.rec.RunnerSessionID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	rt.mu.Lock()
 	rt.setState(stateReady, "")
 	rt.mu.Unlock()
+	rt.event("session.ready", rt.lastUsageTotal.Load(), 0, "", map[string]any{"private_ingest_url": rt.rec.PrivateIngestURL})
 	resp := createSessionResponse{
-		RunnerSessionID: rt.rec.RunnerSessionID,
-		State:           rt.rec.State,
-		CreatedAt:       rt.rec.CreatedAt.Format(time.RFC3339),
+		RunnerSessionID:  rt.rec.RunnerSessionID,
+		State:            rt.rec.State,
+		PrivateIngestURL: rt.rec.PrivateIngestURL,
+		CreatedAt:        rt.rec.CreatedAt.Format(time.RFC3339),
 	}
-	resp.Media.Ingest.RTMPURL = rt.rec.RTMPURL
-	resp.Media.Ingest.StreamKey = rt.rec.StreamKey
-	resp.Media.Playback.HLSURL = s.publicHLSURL(r, rt.rec.HLSURL)
+	if rt.rec.Mode == modeLocalHLSServe {
+		resp.Media.Ingest.RTMPURL = rt.rec.RTMPURL
+		resp.Media.Ingest.StreamKey = rt.rec.StreamKey
+		resp.Media.Playback.HLSURL = s.publicHLSURL(r, rt.rec.HLSURL)
+	}
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -243,7 +273,10 @@ func (s *server) run(ctx context.Context) error {
 				for _, rt := range s.store.snapshot() {
 					if err := rt.watchdog(s.cfg.SessionNoPublishTTL); err != nil {
 						log.Printf("[live %s] watchdog: %v", rt.rec.RunnerSessionID, err)
-						rt.event("session.failed", rt.lastUsageTotal.Load(), 0, rt.rec.CloseReason, map[string]any{"reason": rt.rec.CloseReason})
+						rt.event("session.publish_stopped", rt.lastUsageTotal.Load(), 0, rt.rec.CloseReason, map[string]any{"reason": rt.rec.CloseReason})
+						if rt.rec.State == stateFailed {
+							rt.event("session.failed", rt.lastUsageTotal.Load(), 0, rt.rec.CloseReason, map[string]any{"reason": rt.rec.CloseReason})
+						}
 					} else if rt.rec.State == statePublishing {
 						rt.heartbeatNow()
 						rt.event("session.heartbeat", rt.lastUsageTotal.Load(), 0, "", nil)

@@ -66,11 +66,12 @@ func startFFmpeg(rt *sessionRuntime, plan buildRuntime, hw transcode.HWProfile) 
 			if line == "" {
 				continue
 			}
+			line = redactSecrets(line, rt.rec.StreamKey)
 			if p, ok := transcode.ParseProgressLine(line); ok {
 				total := uint64(p.Time / time.Second)
 				delta, started := rt.markProgress(total)
 				if started {
-					rt.event("session.started", total, 0, "", map[string]any{"listen_url": plan.ListenURL})
+					rt.event("session.publish_started", total, 0, "", map[string]any{"listen_url": plan.ListenURL})
 				}
 				if delta > 0 {
 					rt.event("session.usage.tick", total, delta, "", nil)
@@ -85,6 +86,9 @@ func startFFmpeg(rt *sessionRuntime, plan buildRuntime, hw transcode.HWProfile) 
 			return
 		}
 		if err != nil {
+			if rt.metrics != nil {
+				rt.metrics.ffmpegExitTotal.Add(1)
+			}
 			tail := stderrTail.join()
 			if tail != "" {
 				log.Printf("[live %s] ffmpeg exited: %v stderr_tail=%q", rt.rec.RunnerSessionID, err, tail)
@@ -111,6 +115,7 @@ func startFFmpeg(rt *sessionRuntime, plan buildRuntime, hw transcode.HWProfile) 
 		<-rt.ffmpegDone
 		return err
 	}
+	rt.setListenerBound(true)
 	return nil
 }
 

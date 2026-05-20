@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -179,6 +180,67 @@ func TestCreateSessionUsesConfiguredSchemeForHLSURL(t *testing.T) {
 	}
 }
 
+func TestCreateSessionGatewayIngestMode(t *testing.T) {
+	s := newTestServer(t)
+	body := liveSessionRequest{
+		BrokerSessionID: "bsess_gw",
+		WorkID:          "work_gw",
+		CapabilityID:    "livepeer:transcode/live-gateway-ingest",
+		OfferingID:      "default",
+		SessionParams:   liveSessionParams{Name: "gateway"},
+		OutputCredential: &s3OutputCredential{
+			Endpoint:        "https://s3-dev.xode.app",
+			Region:          "us-east-1",
+			Bucket:          "bucket",
+			KeyPrefix:       "live-out/a/b/",
+			AccessKeyID:     "AKIA_TEST",
+			SecretAccessKey: "secret",
+			SessionToken:    "token",
+			ExpiresAt:       "2026-05-20T22:10:00Z",
+		},
+		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_1234"},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/video/live/sessions", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out createSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if out.PrivateIngestURL != "rtmp://127.0.0.1:19350/live/gws_1234" {
+		t.Fatalf("private ingest url=%q", out.PrivateIngestURL)
+	}
+	if out.Media.Playback.HLSURL != "" {
+		t.Fatalf("expected empty hls url, got %q", out.Media.Playback.HLSURL)
+	}
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/video/live/sessions/"+out.RunnerSessionID, nil)
+	getReq.SetPathValue("id", out.RunnerSessionID)
+	getReq.Header.Set("Authorization", "Bearer secret")
+	getRec := httptest.NewRecorder()
+	s.routes().ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getRec.Code, getRec.Body.String())
+	}
+	var got getSessionResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode get: %v", err)
+	}
+	if got.Ingest.Mode != modeGatewayIngest {
+		t.Fatalf("ingest mode=%q", got.Ingest.Mode)
+	}
+	if got.Output.Mode != outputModeS3Push {
+		t.Fatalf("output mode=%q", got.Output.Mode)
+	}
+	if got.Output.TargetPrefix != "live-out/a/b/" {
+		t.Fatalf("target prefix=%q", got.Output.TargetPrefix)
+	}
+}
+
 func TestHLSHandlerBlocksTraversal(t *testing.T) {
 	dir := t.TempDir()
 	h := hlsHandler(dir, "/_hls")
@@ -205,5 +267,27 @@ func TestHLSHandlerServesFile(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHealthIncludesMetrics(t *testing.T) {
+	s := newTestServer(t)
+	s.metrics.outputCredentialPutSuccess.Add(2)
+	s.metrics.outputCredentialPutFailure.Add(1)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d", rec.Code)
+	}
+	body, err := io.ReadAll(rec.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !bytes.Contains(body, []byte(`"output_credential_put_success":2`)) {
+		t.Fatalf("body=%s", body)
+	}
+	if !bytes.Contains(body, []byte(`"output_credential_put_failures":1`)) {
+		t.Fatalf("body=%s", body)
 	}
 }

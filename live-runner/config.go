@@ -11,6 +11,7 @@ type config struct {
 	RunnerAddr          string
 	PublicHost          string
 	PublicScheme        string
+	IngestPublicHost    string
 	TempDir             string
 	HLSBasePath         string
 	HLSWindowSegments   int
@@ -27,6 +28,7 @@ type config struct {
 	CallbackTimeout     time.Duration
 	CallbackInterval    time.Duration
 	UsageTickInterval   time.Duration
+	OutputSyncInterval  time.Duration
 	FFmpegBin           string
 }
 
@@ -35,6 +37,7 @@ func loadConfig() config {
 		RunnerAddr:          env("RUNNER_ADDR", ":8080"),
 		PublicHost:          env("PUBLIC_HOST", "127.0.0.1:8080"),
 		PublicScheme:        env("PUBLIC_URL_SCHEME", ""),
+		IngestPublicHost:    env("RUNNER_INGEST_PUBLIC_HOST", env("RTMP_PUBLIC_HOST", "127.0.0.1")),
 		TempDir:             env("TEMP_DIR", "/tmp/live"),
 		HLSBasePath:         env("HLS_BASE_PATH", "/_hls"),
 		HLSWindowSegments:   envInt("HLS_WINDOW_SEGMENTS", 6),
@@ -51,6 +54,7 @@ func loadConfig() config {
 		CallbackTimeout:     envDuration("BROKER_CALLBACK_TIMEOUT", 5*time.Second),
 		CallbackInterval:    envDuration("SESSION_HEARTBEAT_INTERVAL", 10*time.Second),
 		UsageTickInterval:   envDuration("SESSION_USAGE_TICK_INTERVAL", 5*time.Second),
+		OutputSyncInterval:  envDuration("OUTPUT_SYNC_INTERVAL", 250*time.Millisecond),
 		FFmpegBin:           env("FFMPEG_BIN", "ffmpeg"),
 	}
 }
