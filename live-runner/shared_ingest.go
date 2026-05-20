@@ -76,12 +76,20 @@ type gatewayIngestHandler struct {
 	encoder *flv.Encoder
 }
 
+func (h *gatewayIngestHandler) rejectIngest(rt *sessionRuntime) {
+	if rt != nil {
+		rt.noteIngestRejected()
+		return
+	}
+	if h.metrics != nil {
+		h.metrics.ingestAuthenticationReject.Add(1)
+	}
+}
+
 func (h *gatewayIngestHandler) OnPublish(_ *rtmp.StreamContext, _ uint32, cmd *rtmpmsg.NetStreamPublish) error {
 	rt := h.store.byStreamKey(cmd.PublishingName)
 	if rt == nil || rt.rec.Mode != modeGatewayIngest {
-		if h.metrics != nil {
-			h.metrics.ingestAuthenticationReject.Add(1)
-		}
+		h.rejectIngest(rt)
 		return fmt.Errorf("unknown ingest stream")
 	}
 	writer, encoder, err := openIngestPipe(rt)
@@ -96,9 +104,7 @@ func (h *gatewayIngestHandler) OnPublish(_ *rtmp.StreamContext, _ uint32, cmd *r
 }
 
 func (h *gatewayIngestHandler) OnPlay(_ *rtmp.StreamContext, _ uint32, _ *rtmpmsg.NetStreamPlay) error {
-	if h.metrics != nil {
-		h.metrics.ingestAuthenticationReject.Add(1)
-	}
+	h.rejectIngest(nil)
 	return fmt.Errorf("play not supported")
 }
 

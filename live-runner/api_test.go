@@ -418,6 +418,75 @@ func TestSharedIngestPublishTransitionsSessionToPublishing(t *testing.T) {
 	rt.stop("test_done")
 }
 
+func TestSharedIngestRejectsUnknownStreamKey(t *testing.T) {
+	s3 := newFakeS3Server()
+	defer s3.close()
+
+	s := newTestServer(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	shared, err := startSharedIngest(s.store, s.metrics, addr)
+	if err != nil {
+		t.Fatalf("start shared ingest: %v", err)
+	}
+	defer shared.Close()
+	s.cfg.IngestPublicHost = "127.0.0.1"
+	s.cfg.SharedIngestAddr = addr
+
+	body := liveSessionRequest{
+		BrokerSessionID: "bsess_reject",
+		WorkID:          "work_reject",
+		CapabilityID:    "livepeer:transcode/live-gateway-ingest",
+		OfferingID:      "default",
+		SessionParams:   liveSessionParams{Name: "reject"},
+		OutputCredential: &s3OutputCredential{
+			Endpoint:        s3.server.URL,
+			Region:          "us-east-1",
+			Bucket:          "bucket",
+			KeyPrefix:       "live-out/a/reject/",
+			AccessKeyID:     "AKIA_TEST",
+			SecretAccessKey: "secret",
+			SessionToken:    "token",
+			ExpiresAt:       "2026-05-20T22:10:00Z",
+		},
+		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_expected"},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/video/live/sessions", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out createSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	rt := s.store.get(out.RunnerSessionID)
+	if rt == nil {
+		t.Fatal("session missing from store")
+	}
+
+	_ = publishViaSharedIngress(addr, "gws_wrong")
+
+	waitForCondition(t, 3*time.Second, func() bool {
+		return s.metrics.snapshot().IngestAuthenticationReject >= 1
+	})
+	got := rt.query()
+	if got.State == statePublishing {
+		t.Fatalf("unexpected publishing state for rejected stream: %+v", got.Ingest)
+	}
+	if got.Ingest.Authenticated || got.Ingest.ConnectedPublisher {
+		t.Fatalf("unexpected ingest auth state after rejection: %+v", got.Ingest)
+	}
+	rt.stop("test_done")
+}
+
 func TestHLSHandlerBlocksTraversal(t *testing.T) {
 	dir := t.TempDir()
 	h := hlsHandler(dir, "/_hls")
