@@ -43,6 +43,15 @@ func newSessionRuntime(cfg config, req liveSessionRequest, preset transcodePrese
 	if req.OutputCredential == nil {
 		return nil, errors.New("output_credential is required")
 	}
+	if expiresAt := strings.TrimSpace(req.OutputCredential.ExpiresAt); expiresAt != "" {
+		ts, err := time.Parse(time.RFC3339, expiresAt)
+		if err != nil {
+			return nil, errors.New("output_credential.expires_at must be RFC3339")
+		}
+		if !ts.After(time.Now().UTC()) {
+			return nil, errors.New("output_credential is already expired")
+		}
+	}
 	if req.IngestAccept == nil || strings.TrimSpace(req.IngestAccept.StreamKey) == "" {
 		return nil, errors.New("ingest_accept.stream_key is required")
 	}

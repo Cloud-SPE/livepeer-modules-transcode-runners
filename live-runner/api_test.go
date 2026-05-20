@@ -179,6 +179,72 @@ func TestCreateSessionRequiresGatewayFields(t *testing.T) {
 	}
 }
 
+func TestCreateSessionRejectsExpiredOutputCredential(t *testing.T) {
+	s := newTestServer(t)
+	body := liveSessionRequest{
+		BrokerSessionID: "bsess_expired",
+		WorkID:          "work_expired",
+		CapabilityID:    "video:transcode.live",
+		OfferingID:      "default",
+		SessionParams:   liveSessionParams{Name: "expired"},
+		OutputCredential: &s3OutputCredential{
+			Endpoint:        "https://s3-dev.xode.app",
+			Region:          "us-east-1",
+			Bucket:          "bucket",
+			KeyPrefix:       "live-out/a/expired/",
+			AccessKeyID:     "AKIA_TEST",
+			SecretAccessKey: "secret",
+			SessionToken:    "token",
+			ExpiresAt:       "2020-01-01T00:00:00Z",
+		},
+		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_expired"},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/video/live/sessions", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "output_credential is already expired") {
+		t.Fatalf("unexpected body=%s", rec.Body.String())
+	}
+}
+
+func TestCreateSessionRejectsMalformedOutputCredentialExpiry(t *testing.T) {
+	s := newTestServer(t)
+	body := liveSessionRequest{
+		BrokerSessionID: "bsess_badexp",
+		WorkID:          "work_badexp",
+		CapabilityID:    "video:transcode.live",
+		OfferingID:      "default",
+		SessionParams:   liveSessionParams{Name: "badexp"},
+		OutputCredential: &s3OutputCredential{
+			Endpoint:        "https://s3-dev.xode.app",
+			Region:          "us-east-1",
+			Bucket:          "bucket",
+			KeyPrefix:       "live-out/a/badexp/",
+			AccessKeyID:     "AKIA_TEST",
+			SecretAccessKey: "secret",
+			SessionToken:    "token",
+			ExpiresAt:       "not-a-time",
+		},
+		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_badexp"},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/video/live/sessions", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "output_credential.expires_at must be RFC3339") {
+		t.Fatalf("unexpected body=%s", rec.Body.String())
+	}
+}
+
 func TestCreateSessionGatewayIngestMode(t *testing.T) {
 	s := newTestServer(t)
 	body := liveSessionRequest{
