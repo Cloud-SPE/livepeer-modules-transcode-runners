@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -241,6 +243,82 @@ func TestCreateSessionGatewayIngestMode(t *testing.T) {
 	}
 }
 
+func TestGatewayIngestUploadsAndDeletesSegments(t *testing.T) {
+	s3 := newFakeS3Server()
+	defer s3.close()
+
+	s := newTestServer(t)
+	s.cfg.OutputSyncInterval = 50 * time.Millisecond
+	body := liveSessionRequest{
+		BrokerSessionID: "bsess_s3",
+		WorkID:          "work_s3",
+		CapabilityID:    "livepeer:transcode/live-gateway-ingest",
+		OfferingID:      "default",
+		SessionParams:   liveSessionParams{Name: "gateway"},
+		OutputCredential: &s3OutputCredential{
+			Endpoint:        s3.server.URL,
+			Region:          "us-east-1",
+			Bucket:          "bucket",
+			KeyPrefix:       "live-out/a/b/",
+			AccessKeyID:     "AKIA_TEST",
+			SecretAccessKey: "secret",
+			SessionToken:    "token",
+			ExpiresAt:       "2026-05-20T22:10:00Z",
+		},
+		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_s3"},
+	}
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/video/live/sessions", bytes.NewReader(data))
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out createSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	rt := s.store.get(out.RunnerSessionID)
+	if rt == nil {
+		t.Fatal("session missing from store")
+	}
+
+	masterPath := filepath.Join(rt.rec.OutputDir, "master.m3u8")
+	segmentPath := filepath.Join(rt.rec.OutputDir, "v0", "segment_000000.ts")
+	if err := os.MkdirAll(filepath.Dir(segmentPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(masterPath, []byte("#EXTM3U\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(segmentPath, []byte("segment"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	waitForCondition(t, 3*time.Second, func() bool {
+		_, ok1 := s3.snapshot()["bucket/live-out/a/b/master.m3u8"]
+		_, ok2 := s3.snapshot()["bucket/live-out/a/b/v0/segment_000000.ts"]
+		return ok1 && ok2
+	})
+
+	if err := os.Remove(segmentPath); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, 3*time.Second, func() bool {
+		_, ok := s3.snapshot()["bucket/live-out/a/b/v0/segment_000000.ts"]
+		return !ok
+	})
+
+	got := rt.query()
+	if got.Output.PutSuccessCount < 2 {
+		t.Fatalf("put success count=%d", got.Output.PutSuccessCount)
+	}
+	if got.Output.TargetPrefix != "live-out/a/b/" {
+		t.Fatalf("target prefix=%q", got.Output.TargetPrefix)
+	}
+}
+
 func TestHLSHandlerBlocksTraversal(t *testing.T) {
 	dir := t.TempDir()
 	h := hlsHandler(dir, "/_hls")
@@ -290,4 +368,63 @@ func TestHealthIncludesMetrics(t *testing.T) {
 	if !bytes.Contains(body, []byte(`"output_credential_put_failures":1`)) {
 		t.Fatalf("body=%s", body)
 	}
+}
+
+type fakeS3Server struct {
+	server *httptest.Server
+	mu     sync.Mutex
+	files  map[string][]byte
+}
+
+func newFakeS3Server() *fakeS3Server {
+	f := &fakeS3Server{files: make(map[string][]byte)}
+	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.URL.Path, "/")
+		switch r.Method {
+		case http.MethodPut:
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			f.mu.Lock()
+			f.files[key] = body
+			f.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		case http.MethodDelete:
+			f.mu.Lock()
+			delete(f.files, key)
+			f.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	return f
+}
+
+func (f *fakeS3Server) snapshot() map[string][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string][]byte, len(f.files))
+	for k, v := range f.files {
+		out[k] = append([]byte(nil), v...)
+	}
+	return out
+}
+
+func (f *fakeS3Server) close() {
+	f.server.Close()
+}
+
+func waitForCondition(t *testing.T, timeout time.Duration, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("condition not met before timeout")
 }
