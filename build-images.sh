@@ -11,7 +11,7 @@
 # Environment:
 #   REGISTRY        Docker registry prefix for deployable runner images (default: tztcloud)
 #   INTERNAL_REGISTRY  Local/internal prefix for build-only base images (default: localbuild)
-#   TAG             Image tag (default: v1.3.0)
+#   TAG             Image tag (default: v1.3.1)
 #   CUDA_VERSION    NVIDIA CUDA tag (default: 13.2.1)
 #   UBUNTU_VERSION  Ubuntu version (default: 24.04)
 #   GO_VERSION      Go toolchain (default: 1.25.7)
@@ -24,7 +24,7 @@ cd "$ROOT"
 
 REGISTRY="${REGISTRY:-tztcloud}"
 INTERNAL_REGISTRY="${INTERNAL_REGISTRY:-localbuild}"
-TAG="${TAG:-v1.3.0}"
+TAG="${TAG:-v1.3.1}"
 CUDA_VERSION="${CUDA_VERSION:-13.2.1}"
 UBUNTU_VERSION="${UBUNTU_VERSION:-24.04}"
 GO_VERSION="${GO_VERSION:-1.25.7}"

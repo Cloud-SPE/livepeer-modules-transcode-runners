@@ -40,7 +40,7 @@ Key environment overrides:
 
 - `REGISTRY` default `tztcloud`
 - `INTERNAL_REGISTRY` default `localbuild`
-- `TAG` default `v1.3.0`
+- `TAG` default `v1.3.1`
 - `CUDA_VERSION` default `13.2.1`
 - `UBUNTU_VERSION` default `24.04`
 - `GO_VERSION` default `1.25.7`

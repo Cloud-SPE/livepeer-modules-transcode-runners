@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=localbuild/ffmpeg-base-amd:v1.3.0
+ARG BASE_IMAGE=localbuild/ffmpeg-base-amd:v1.3.1
 ARG GO_VERSION=1.25.7
 ARG BUILD_VERSION=dev
 ARG BUILD_COMMIT=no-vcs

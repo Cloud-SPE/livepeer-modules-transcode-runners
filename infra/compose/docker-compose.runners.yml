@@ -1,6 +1,6 @@
 services:
   transcode_runner_amd:
-    image: ${REGISTRY:-tztcloud}/transcode-runner-amd:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/transcode-runner-amd:${TAG:-v1.3.1}
     profiles: ["amd"]
     devices:
       - /dev/dri:/dev/dri
@@ -17,7 +17,7 @@ services:
       - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
 
   abr_runner_amd:
-    image: ${REGISTRY:-tztcloud}/abr-runner-amd:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/abr-runner-amd:${TAG:-v1.3.1}
     profiles: ["amd"]
     devices:
       - /dev/dri:/dev/dri
@@ -34,7 +34,7 @@ services:
       - "${ABR_RUNNER_PORT:-8087}:8080"
 
   live_runner_amd:
-    image: ${REGISTRY:-tztcloud}/live-runner-amd:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/live-runner-amd:${TAG:-v1.3.1}
     profiles: ["amd"]
     devices:
       - /dev/dri:/dev/dri
@@ -55,7 +55,7 @@ services:
       - "${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}:${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}"
 
   transcode_runner_intel:
-    image: ${REGISTRY:-tztcloud}/transcode-runner-intel:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/transcode-runner-intel:${TAG:-v1.3.1}
     profiles: ["intel"]
     devices:
       - /dev/dri:/dev/dri
@@ -72,7 +72,7 @@ services:
       - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
 
   abr_runner_intel:
-    image: ${REGISTRY:-tztcloud}/abr-runner-intel:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/abr-runner-intel:${TAG:-v1.3.1}
     profiles: ["intel"]
     devices:
       - /dev/dri:/dev/dri
@@ -89,7 +89,7 @@ services:
       - "${ABR_RUNNER_PORT:-8087}:8080"
 
   live_runner_intel:
-    image: ${REGISTRY:-tztcloud}/live-runner-intel:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/live-runner-intel:${TAG:-v1.3.1}
     profiles: ["intel"]
     devices:
       - /dev/dri:/dev/dri
@@ -110,7 +110,7 @@ services:
       - "${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}:${LIVE_RTMP_PORT_START:-19350}-${LIVE_RTMP_PORT_END:-19449}"
 
   transcode_runner_nvidia:
-    image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v1.3.1}
     profiles: ["nvidia"]
     runtime: nvidia
     environment:
@@ -126,7 +126,7 @@ services:
       - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
 
   abr_runner_nvidia:
-    image: ${REGISTRY:-tztcloud}/abr-runner-nvidia:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/abr-runner-nvidia:${TAG:-v1.3.1}
     profiles: ["nvidia"]
     runtime: nvidia
     environment:
@@ -142,7 +142,7 @@ services:
       - "${ABR_RUNNER_PORT:-8087}:8080"
 
   live_runner_nvidia:
-    image: ${REGISTRY:-tztcloud}/live-runner-nvidia:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/live-runner-nvidia:${TAG:-v1.3.1}
     profiles: ["nvidia"]
     runtime: nvidia
     environment:

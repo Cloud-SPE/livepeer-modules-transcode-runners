@@ -1,6 +1,6 @@
 services:
   transcode_runner:
-    image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v1.3.1}
     container_name: ${TRANSCODE_CONTAINER_NAME:-transcode-runner}
     restart: unless-stopped
     runtime: nvidia
@@ -37,7 +37,7 @@ services:
               capabilities: [gpu]
 
   abr_runner:
-    image: ${REGISTRY:-tztcloud}/abr-runner-nvidia:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/abr-runner-nvidia:${TAG:-v1.3.1}
     container_name: ${ABR_CONTAINER_NAME:-abr-runner}
     restart: unless-stopped
     runtime: nvidia
@@ -74,7 +74,7 @@ services:
               capabilities: [gpu]
 
   live_runner:
-    image: ${REGISTRY:-tztcloud}/live-runner-nvidia:${TAG:-v1.3.0}
+    image: ${REGISTRY:-tztcloud}/live-runner-nvidia:${TAG:-v1.3.1}
     container_name: ${LIVE_CONTAINER_NAME:-live-runner}
     restart: unless-stopped
     runtime: nvidia
