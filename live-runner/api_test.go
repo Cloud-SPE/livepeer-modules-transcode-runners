@@ -34,6 +34,10 @@ func newTestServer(t *testing.T) *server {
 	return s
 }
 
+func futureRFC3339(d time.Duration) string {
+	return time.Now().UTC().Add(d).Format(time.RFC3339)
+}
+
 func writeFakeFFmpeg(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fake-ffmpeg.py")
@@ -118,7 +122,7 @@ func TestCreateGetDeleteSession(t *testing.T) {
 			AccessKeyID:     "AKIA_TEST",
 			SecretAccessKey: "secret",
 			SessionToken:    "token",
-			ExpiresAt:       "2026-05-20T22:10:00Z",
+			ExpiresAt:       futureRFC3339(2 * time.Hour),
 		},
 		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_test"},
 	}
@@ -261,7 +265,7 @@ func TestCreateSessionGatewayIngestMode(t *testing.T) {
 			AccessKeyID:     "AKIA_TEST",
 			SecretAccessKey: "secret",
 			SessionToken:    "token",
-			ExpiresAt:       "2026-05-20T22:10:00Z",
+			ExpiresAt:       futureRFC3339(2 * time.Hour),
 		},
 		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_1234"},
 	}
@@ -326,7 +330,7 @@ func TestGatewayIngestUploadsAndDeletesSegments(t *testing.T) {
 			AccessKeyID:     "AKIA_TEST",
 			SecretAccessKey: "secret",
 			SessionToken:    "token",
-			ExpiresAt:       "2026-05-20T22:10:00Z",
+			ExpiresAt:       futureRFC3339(2 * time.Hour),
 		},
 		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_s3"},
 	}
@@ -418,7 +422,7 @@ func TestSharedIngestPublishTransitionsSessionToPublishing(t *testing.T) {
 			AccessKeyID:     "AKIA_TEST",
 			SecretAccessKey: "secret",
 			SessionToken:    "token",
-			ExpiresAt:       "2026-05-20T22:10:00Z",
+			ExpiresAt:       futureRFC3339(2 * time.Hour),
 		},
 		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_publish"},
 	}
@@ -483,7 +487,7 @@ func TestSharedIngestRejectsUnknownStreamKey(t *testing.T) {
 			AccessKeyID:     "AKIA_TEST",
 			SecretAccessKey: "secret",
 			SessionToken:    "token",
-			ExpiresAt:       "2026-05-20T22:10:00Z",
+			ExpiresAt:       futureRFC3339(2 * time.Hour),
 		},
 		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_expected"},
 	}
@@ -553,7 +557,7 @@ func TestGatewayIngestEndToEndPublishesAndUploadsHLS(t *testing.T) {
 			AccessKeyID:     "AKIA_TEST",
 			SecretAccessKey: "secret",
 			SessionToken:    "token",
-			ExpiresAt:       "2026-05-20T22:10:00Z",
+			ExpiresAt:       futureRFC3339(2 * time.Hour),
 		},
 		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_e2e"},
 	}
@@ -624,7 +628,7 @@ func TestGatewayIngestUploadFailureThresholdAndRecovery(t *testing.T) {
 			AccessKeyID:     "AKIA_TEST",
 			SecretAccessKey: "secret",
 			SessionToken:    "token",
-			ExpiresAt:       "2026-05-20T22:10:00Z",
+			ExpiresAt:       futureRFC3339(2 * time.Hour),
 		},
 		IngestAccept: &liveIngestAcceptance{StreamKey: "gws_fail"},
 	}

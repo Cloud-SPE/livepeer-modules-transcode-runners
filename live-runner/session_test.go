@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+type testCloser struct {
+	closed bool
+}
+
+func (c *testCloser) Close() error {
+	c.closed = true
+	return nil
+}
+
 func TestMarkProgressTransitionsToPublishing(t *testing.T) {
 	rt := &sessionRuntime{rec: sessionRecord{State: stateReady}}
 	delta, started := rt.markProgress(5)
@@ -141,6 +150,57 @@ func TestEmitUploadFailedIsDeduplicatedUntilRecovery(t *testing.T) {
 	rt.clearUploadFailure()
 	rt.emitUploadFailed(map[string]any{"error_text": "boom"})
 	waitForEventCount(t, events, "session.upload.failed", 2)
+}
+
+func TestShouldLogFFmpegLineSuppressesBoilerplate(t *testing.T) {
+	cases := map[string]bool{
+		"ffmpeg version n7.1.3":                                  false,
+		"configuration: --prefix=/usr/local":                    false,
+		"libavutil      59. 39.100 / 59. 39.100":                false,
+		"[hls @ 0x1] Opening '/tmp/live/rsess/v0/segment.ts'":   false,
+		"[swscaler @ 0x1] deprecated pixel format used":         false,
+		"[h264 @ 0x1] mmco: unref short failure":                true,
+		"Error opening input files: Connection refused":         true,
+	}
+	for line, want := range cases {
+		if got := shouldLogFFmpegLine(line); got != want {
+			t.Fatalf("line=%q got=%v want=%v", line, got, want)
+		}
+	}
+}
+
+func TestPublisherDisconnectDoesNotCloseIngestPipe(t *testing.T) {
+	pipe := &testCloser{}
+	rt := &sessionRuntime{
+		rec: sessionRecord{
+			RunnerSessionID: "rsess_test",
+			State:           statePublishing,
+			Ingest: liveIngestStatus{
+				ConnectedPublisher: true,
+			},
+		},
+		ingestPipe: pipe,
+	}
+
+	rt.notePublisherDisconnected("publisher_disconnected")
+
+	if pipe.closed {
+		t.Fatal("expected disconnect to preserve ingest pipe for reconnect window")
+	}
+	if rt.rec.State != stateStalled {
+		t.Fatalf("state=%s", rt.rec.State)
+	}
+	if rt.rec.Ingest.ConnectedPublisher {
+		t.Fatal("expected publisher to be marked disconnected")
+	}
+}
+
+func TestFormatAuthorizationScopeRedactsAccessKey(t *testing.T) {
+	auth := "AWS4-HMAC-SHA256 Credential=AKIAEXAMPLE1234/20260520/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=abcd"
+	got := formatAuthorizationScope(auth)
+	if got != "1234/20260520/us-east-1/s3/aws4_request" {
+		t.Fatalf("scope=%q", got)
+	}
 }
 
 type collectedEvents struct {

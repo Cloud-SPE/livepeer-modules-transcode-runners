@@ -99,7 +99,11 @@ func (h *gatewayIngestHandler) OnPublish(_ *rtmp.StreamContext, _ uint32, cmd *r
 	h.session = rt
 	h.writer = writer
 	h.encoder = encoder
+	rt.attachIngestPipe(writer)
 	rt.notePublisherAccepted()
+	log.Printf("[live %s] ingest publish accepted app=live stream_key_suffix=%s",
+		rt.rec.RunnerSessionID, maskSecretSuffix(cmd.PublishingName),
+	)
 	return nil
 }
 
@@ -152,9 +156,13 @@ func (h *gatewayIngestHandler) OnVideo(timestamp uint32, payload io.Reader) erro
 
 func (h *gatewayIngestHandler) OnClose() {
 	if h.writer != nil {
+		if h.session != nil {
+			h.session.clearIngestPipe(h.writer)
+		}
 		_ = h.writer.Close()
 	}
 	if h.session != nil {
+		log.Printf("[live %s] ingest connection closed", h.session.rec.RunnerSessionID)
 		h.session.notePublisherDisconnected("publisher_disconnected")
 		h.session.emitPublishStopped("publisher_disconnected", nil)
 	}

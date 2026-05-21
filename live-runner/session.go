@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ type sessionRuntime struct {
 	metrics         *runnerMetrics
 	ffmpegCancel    context.CancelFunc
 	ffmpegDone      chan struct{}
+	ingestPipe      io.Closer
 	uploadCancel    context.CancelFunc
 	uploadDone      chan struct{}
 	sequence        atomic.Uint64
@@ -230,6 +232,7 @@ func (rt *sessionRuntime) stop(reason string) {
 	if !rt.beginTerminate(reason) {
 		return
 	}
+	rt.closeIngestPipe()
 	if rt.ffmpegCancel != nil {
 		rt.ffmpegCancel()
 	}
@@ -249,6 +252,7 @@ func (rt *sessionRuntime) fail(reason string) {
 	if !rt.beginTerminate(reason) {
 		return
 	}
+	rt.closeIngestPipe()
 	if rt.ffmpegCancel != nil {
 		rt.ffmpegCancel()
 	}
@@ -343,18 +347,23 @@ func (rt *sessionRuntime) watchdog(noPublishTTL time.Duration) error {
 	createdAt := rt.rec.CreatedAt
 	lastPacketAt := rt.rec.LastPacketAt
 	idleTimeout := rt.rec.IdleTimeout
+	runnerSessionID := rt.rec.RunnerSessionID
 	rt.mu.Unlock()
 
 	switch state {
 	case stateReady:
 		if noPublishTTL > 0 && now.Sub(createdAt) > noPublishTTL {
-			log.Printf("[live %s] no publish timeout", rt.rec.RunnerSessionID)
+			log.Printf("[live %s] no publish timeout created_at=%s now=%s no_publish_ttl=%s",
+				runnerSessionID, createdAt.Format(time.RFC3339), now.Format(time.RFC3339), noPublishTTL,
+			)
 			rt.fail("no_publish_timeout")
 			return errors.New("no publish timeout")
 		}
 	case statePublishing:
 		if idleTimeout > 0 && !lastPacketAt.IsZero() && now.Sub(lastPacketAt) > idleTimeout {
-			log.Printf("[live %s] idle timeout", rt.rec.RunnerSessionID)
+			log.Printf("[live %s] idle timeout state=%s last_packet_at=%s now=%s idle_timeout=%s idle_for=%s",
+				runnerSessionID, state, lastPacketAt.Format(time.RFC3339), now.Format(time.RFC3339), idleTimeout, now.Sub(lastPacketAt).Round(time.Millisecond),
+			)
 			rt.mu.Lock()
 			rt.rec.Ingest.ConnectedPublisher = false
 			rt.setState(stateStalled, "idle_timeout")
@@ -363,7 +372,9 @@ func (rt *sessionRuntime) watchdog(noPublishTTL time.Duration) error {
 		}
 	case stateStalled:
 		if idleTimeout > 0 && !lastPacketAt.IsZero() && now.Sub(lastPacketAt) > idleTimeout*2 {
-			log.Printf("[live %s] stalled session failed", rt.rec.RunnerSessionID)
+			log.Printf("[live %s] stalled session failed state=%s last_packet_at=%s now=%s idle_timeout=%s idle_for=%s",
+				runnerSessionID, state, lastPacketAt.Format(time.RFC3339), now.Format(time.RFC3339), idleTimeout, now.Sub(lastPacketAt).Round(time.Millisecond),
+			)
 			rt.fail("idle_timeout")
 			return errors.New("idle timeout")
 		}
@@ -422,23 +433,73 @@ func (rt *sessionRuntime) noteIngestRejected() {
 
 func (rt *sessionRuntime) notePublisherDisconnected(reason string) {
 	rt.mu.Lock()
+	lastPacketAt := rt.rec.Ingest.LastPacketAt
+	state := rt.rec.State
 	rt.rec.Ingest.ConnectedPublisher = false
 	if rt.rec.State == statePublishing {
 		rt.setState(stateStalled, reason)
 	}
 	rt.mu.Unlock()
+	if lastPacketAt.IsZero() {
+		log.Printf("[live %s] publisher disconnected state=%s reason=%s last_packet_at=<none>; session stalled awaiting reconnect",
+			rt.rec.RunnerSessionID, state, reason,
+		)
+		return
+	}
+	now := time.Now().UTC()
+	log.Printf("[live %s] publisher disconnected state=%s reason=%s last_packet_at=%s disconnected_at=%s idle_for=%s; session stalled awaiting reconnect",
+		rt.rec.RunnerSessionID,
+		state,
+		reason,
+		lastPacketAt.Format(time.RFC3339),
+		now.Format(time.RFC3339),
+		now.Sub(lastPacketAt).Round(time.Millisecond),
+	)
 }
 
 func (rt *sessionRuntime) notePublisherAccepted() {
 	rt.mu.Lock()
+	wasConnected := rt.rec.Ingest.ConnectedPublisher
+	prevState := rt.rec.State
 	rt.rec.Ingest.Authenticated = true
 	rt.rec.Ingest.ConnectedPublisher = true
 	rt.mu.Unlock()
 	rt.resetPublishStoppedEvent()
+	if !wasConnected {
+		log.Printf("[live %s] publisher accepted state=%s stream_key_suffix=%s",
+			rt.rec.RunnerSessionID, prevState, rt.rec.Ingest.StreamKeySuffix,
+		)
+	}
+}
+
+func (rt *sessionRuntime) attachIngestPipe(c io.Closer) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.ingestPipe = c
+}
+
+func (rt *sessionRuntime) clearIngestPipe(c io.Closer) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.ingestPipe == c {
+		rt.ingestPipe = nil
+	}
+}
+
+func (rt *sessionRuntime) closeIngestPipe() {
+	rt.mu.Lock()
+	c := rt.ingestPipe
+	rt.ingestPipe = nil
+	rt.mu.Unlock()
+	if c != nil {
+		_ = c.Close()
+	}
 }
 
 func (rt *sessionRuntime) noteIngestPacket(now time.Time) {
 	rt.mu.Lock()
+	prevState := rt.rec.State
+	prevLastPacketAt := rt.rec.Ingest.LastPacketAt
 	if rt.rec.State == stateReady || rt.rec.State == stateProvisioning || rt.rec.State == stateStalled {
 		if rt.rec.StartedAt.IsZero() {
 			rt.rec.StartedAt = now
@@ -453,6 +514,20 @@ func (rt *sessionRuntime) noteIngestPacket(now time.Time) {
 	}
 	rt.rec.Ingest.LastPacketAt = now
 	rt.mu.Unlock()
+	if prevState == stateStalled {
+		if prevLastPacketAt.IsZero() {
+			log.Printf("[live %s] ingest resumed from stalled last_packet_at=<none> resumed_at=%s",
+				rt.rec.RunnerSessionID, now.Format(time.RFC3339),
+			)
+		} else {
+			log.Printf("[live %s] ingest resumed from stalled last_packet_at=%s resumed_at=%s gap=%s",
+				rt.rec.RunnerSessionID,
+				prevLastPacketAt.Format(time.RFC3339),
+				now.Format(time.RFC3339),
+				now.Sub(prevLastPacketAt).Round(time.Millisecond),
+			)
+		}
+	}
 }
 
 func maskSecretSuffix(s string) string {

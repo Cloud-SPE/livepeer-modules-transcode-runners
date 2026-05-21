@@ -9,42 +9,44 @@ import (
 )
 
 type config struct {
-	RunnerAddr             string
-	IngestPublicHost       string
-	SharedIngestAddr       string
-	TempDir                string
-	HLSWindowSegments      int
-	DefaultPreset          string
-	PresetsFile            string
-	BrokerToken            string
-	SessionNoPublishTTL    time.Duration
-	SessionIdleTTL         time.Duration
-	CallbackTimeout        time.Duration
-	CallbackInterval       time.Duration
-	UsageTickInterval      time.Duration
-	OutputSyncInterval     time.Duration
-	OutputFailureThreshold int
-	FFmpegBin              string
+	RunnerAddr                string
+	IngestPublicHost          string
+	SharedIngestAddr          string
+	TempDir                   string
+	HLSWindowSegments         int
+	DefaultPreset             string
+	PresetsFile               string
+	BrokerToken               string
+	SessionNoPublishTTL       time.Duration
+	SessionIdleTTL            time.Duration
+	CallbackTimeout           time.Duration
+	CallbackInterval          time.Duration
+	UsageTickInterval         time.Duration
+	OutputSyncInterval        time.Duration
+	OutputFailureThreshold    int
+	OutputSyncUnsignedPayload bool
+	FFmpegBin                 string
 }
 
 func loadConfig() config {
 	return config{
-		RunnerAddr:             env("RUNNER_ADDR", ":8080"),
-		IngestPublicHost:       env("RUNNER_INGEST_PUBLIC_HOST", "127.0.0.1"),
-		SharedIngestAddr:       env("RUNNER_SHARED_INGEST_ADDR", ":1935"),
-		TempDir:                env("TEMP_DIR", "/tmp/live"),
-		HLSWindowSegments:      envInt("HLS_WINDOW_SEGMENTS", 6),
-		DefaultPreset:          env("DEFAULT_LIVE_PRESET", "default"),
-		PresetsFile:            env("PRESETS_FILE", ""),
-		BrokerToken:            env("BROKER_AUTH_TOKEN", ""),
-		SessionNoPublishTTL:    envDuration("SESSION_NO_PUBLISH_TTL", 2*time.Minute),
-		SessionIdleTTL:         envDuration("SESSION_IDLE_TTL", 30*time.Second),
-		CallbackTimeout:        envDuration("BROKER_CALLBACK_TIMEOUT", 5*time.Second),
-		CallbackInterval:       envDuration("SESSION_HEARTBEAT_INTERVAL", 10*time.Second),
-		UsageTickInterval:      envDuration("SESSION_USAGE_TICK_INTERVAL", 5*time.Second),
-		OutputSyncInterval:     envDuration("OUTPUT_SYNC_INTERVAL", 250*time.Millisecond),
-		OutputFailureThreshold: envInt("OUTPUT_FAILURE_THRESHOLD", 3),
-		FFmpegBin:              env("FFMPEG_BIN", "ffmpeg"),
+		RunnerAddr:                env("RUNNER_ADDR", ":8080"),
+		IngestPublicHost:          env("RUNNER_INGEST_PUBLIC_HOST", "127.0.0.1"),
+		SharedIngestAddr:          env("RUNNER_SHARED_INGEST_ADDR", ":1935"),
+		TempDir:                   env("TEMP_DIR", "/tmp/live"),
+		HLSWindowSegments:         envInt("HLS_WINDOW_SEGMENTS", 6),
+		DefaultPreset:             env("DEFAULT_LIVE_PRESET", "default"),
+		PresetsFile:               env("PRESETS_FILE", ""),
+		BrokerToken:               env("BROKER_AUTH_TOKEN", ""),
+		SessionNoPublishTTL:       envDuration("SESSION_NO_PUBLISH_TTL", 2*time.Minute),
+		SessionIdleTTL:            envDuration("SESSION_IDLE_TTL", 30*time.Second),
+		CallbackTimeout:           envDuration("BROKER_CALLBACK_TIMEOUT", 5*time.Second),
+		CallbackInterval:          envDuration("SESSION_HEARTBEAT_INTERVAL", 10*time.Second),
+		UsageTickInterval:         envDuration("SESSION_USAGE_TICK_INTERVAL", 5*time.Second),
+		OutputSyncInterval:        envDuration("OUTPUT_SYNC_INTERVAL", 250*time.Millisecond),
+		OutputFailureThreshold:    envInt("OUTPUT_FAILURE_THRESHOLD", 3),
+		OutputSyncUnsignedPayload: envBool("OUTPUT_SYNC_UNSIGNED_PAYLOAD", false),
+		FFmpegBin:                 env("FFMPEG_BIN", "ffmpeg"),
 	}
 }
 
@@ -91,4 +93,16 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+func envBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return b
 }

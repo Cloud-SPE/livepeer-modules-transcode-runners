@@ -3,23 +3,35 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 )
 
 type syncTarget struct {
-	client *s3.Client
-	bucket string
-	prefix string
+	client          *s3.Client
+	endpoint        string
+	region          string
+	bucket          string
+	prefix          string
+	sessionID       string
+	unsignedPayload bool
 }
 
 type fileSnapshot struct {
@@ -36,10 +48,20 @@ func startOutputSync(rt *sessionRuntime) error {
 	if rt.rec.Mode != modeGatewayIngest || rt.rec.OutputCredential == nil {
 		return nil
 	}
-	target, err := newSyncTarget(rt.rec.OutputCredential)
+	target, err := newSyncTarget(rt.rec.RunnerSessionID, rt.rec.OutputCredential, rt.cfg.OutputSyncUnsignedPayload)
 	if err != nil {
 		return err
 	}
+	log.Printf("[live %s] output sync configured endpoint=%s bucket=%s prefix=%s region=%s access_key_id=%s session_token_present=%t",
+		rt.rec.RunnerSessionID,
+		target.endpoint,
+		target.bucket,
+		target.prefix,
+		target.region,
+		maskSecretSuffix(rt.rec.OutputCredential.AccessKeyID),
+		strings.TrimSpace(rt.rec.OutputCredential.SessionToken) != "",
+	)
+	log.Printf("[live %s] output sync signing unsigned_payload=%t", rt.rec.RunnerSessionID, rt.cfg.OutputSyncUnsignedPayload)
 	ctx, cancel := context.WithCancel(context.Background())
 	rt.uploadCancel = cancel
 	rt.uploadDone = make(chan struct{})
@@ -50,17 +72,27 @@ func startOutputSync(rt *sessionRuntime) error {
 	return nil
 }
 
-func newSyncTarget(cred *s3OutputCredential) (*syncTarget, error) {
+func newSyncTarget(sessionID string, cred *s3OutputCredential, unsignedPayload bool) (*syncTarget, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("missing output credential")
 	}
 	if cred.Endpoint == "" || cred.Region == "" || cred.Bucket == "" || cred.KeyPrefix == "" {
 		return nil, fmt.Errorf("incomplete output credential")
 	}
+	baseTransport := http.DefaultTransport
+	if bt, ok := http.DefaultTransport.(*http.Transport); ok {
+		baseTransport = bt.Clone()
+	}
 	cfg := aws.Config{
 		Region:      cred.Region,
 		Credentials: credentials.NewStaticCredentialsProvider(cred.AccessKeyID, cred.SecretAccessKey, cred.SessionToken),
-		HTTPClient:  &http.Client{Timeout: 15 * time.Second},
+		HTTPClient: &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &s3LoggingTransport{
+				sessionID: sessionID,
+				base:      baseTransport,
+			},
+		},
 		EndpointResolverWithOptions: aws.EndpointResolverWithOptionsFunc(func(service, region string, _ ...interface{}) (aws.Endpoint, error) {
 			return aws.Endpoint{URL: cred.Endpoint, HostnameImmutable: true}, nil
 		}),
@@ -69,9 +101,13 @@ func newSyncTarget(cred *s3OutputCredential) (*syncTarget, error) {
 		o.UsePathStyle = true
 	})
 	return &syncTarget{
-		client: client,
-		bucket: cred.Bucket,
-		prefix: strings.TrimLeft(cred.KeyPrefix, "/"),
+		client:          client,
+		endpoint:        strings.TrimSpace(cred.Endpoint),
+		region:          strings.TrimSpace(cred.Region),
+		bucket:          cred.Bucket,
+		prefix:          strings.TrimLeft(cred.KeyPrefix, "/"),
+		sessionID:       sessionID,
+		unsignedPayload: unsignedPayload,
 	}, nil
 }
 
@@ -87,6 +123,9 @@ func watchAndUpload(ctx context.Context, rt *sessionRuntime, target *syncTarget)
 		if err != nil {
 			healthy = false
 			sanitized := sanitizeUploadError(rt, err)
+			log.Printf("[live %s] output sync failure endpoint=%s bucket=%s prefix=%s error=%q",
+				rt.rec.RunnerSessionID, target.endpoint, target.bucket, target.prefix, sanitized,
+			)
 			rt.recordOutputError(fmt.Errorf("%s", sanitized))
 			rt.emitUploadFailed(map[string]any{"error_text": sanitized})
 			if threshold := rt.cfg.OutputFailureThreshold; threshold > 0 && rt.outputFailureCount() >= uint64(threshold) {
@@ -95,6 +134,9 @@ func watchAndUpload(ctx context.Context, rt *sessionRuntime, target *syncTarget)
 					rt.setState(stateStalled, "output_sync_failed")
 				}
 				rt.mu.Unlock()
+				log.Printf("[live %s] output sync stalled session after %d consecutive failures endpoint=%s bucket=%s prefix=%s",
+					rt.rec.RunnerSessionID, rt.outputFailureCount(), target.endpoint, target.bucket, target.prefix,
+				)
 			}
 		} else if ok && !healthy {
 			healthy = true
@@ -104,6 +146,9 @@ func watchAndUpload(ctx context.Context, rt *sessionRuntime, target *syncTarget)
 				rt.setState(statePublishing, "")
 			}
 			rt.mu.Unlock()
+			log.Printf("[live %s] output sync recovered endpoint=%s bucket=%s prefix=%s",
+				rt.rec.RunnerSessionID, target.endpoint, target.bucket, target.prefix,
+			)
 			rt.event("session.upload.healthy", rt.lastUsageTotal.Load(), 0, "", nil)
 		}
 		select {
@@ -150,8 +195,15 @@ func syncOutputTree(ctx context.Context, rt *sessionRuntime, target *syncTarget,
 			}
 			retry.nextAttemptAt = now.Add(backoff * 250 * time.Millisecond)
 			retries[rel] = retry
+			log.Printf("[live %s] upload retry scheduled file=%s failures=%d next_attempt_in=%s",
+				rt.rec.RunnerSessionID, rel, retry.consecutiveFailures, time.Until(retry.nextAttemptAt).Round(time.Millisecond),
+			)
 			return err
 		}
+		key := strings.TrimLeft(strings.TrimSuffix(target.prefix, "/")+"/"+rel, "/")
+		log.Printf("[live %s] s3 put success endpoint=%s bucket=%s key=%s size=%d content_type=%s cache_control=%s",
+			rt.rec.RunnerSessionID, target.endpoint, target.bucket, key, snap.size, contentTypeFor(rel), cacheControlFor(rel),
+		)
 		delete(retries, rel)
 		remote[rel] = struct{}{}
 		seen[rel] = snap
@@ -170,6 +222,10 @@ func syncOutputTree(ctx context.Context, rt *sessionRuntime, target *syncTarget,
 		if err := deleteRemoteFile(ctx, target, rel); err != nil {
 			return false, err
 		}
+		key := strings.TrimLeft(strings.TrimSuffix(target.prefix, "/")+"/"+rel, "/")
+		log.Printf("[live %s] s3 delete success endpoint=%s bucket=%s key=%s",
+			rt.rec.RunnerSessionID, target.endpoint, target.bucket, key,
+		)
 		delete(remote, rel)
 		delete(seen, rel)
 		delete(retries, rel)
@@ -187,15 +243,22 @@ func uploadFile(ctx context.Context, target *syncTarget, rel, path string) error
 		return err
 	}
 	key := strings.TrimLeft(strings.TrimSuffix(target.prefix, "/")+"/"+rel, "/")
-	_, err = target.client.PutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket:       aws.String(target.bucket),
 		Key:          aws.String(key),
 		Body:         bytes.NewReader(body),
 		CacheControl: aws.String(cacheControlFor(rel)),
 		ContentType:  aws.String(contentTypeFor(rel)),
-	})
+	}
+	if target.unsignedPayload {
+		_, err = target.client.PutObject(ctx, input, s3.WithAPIOptions(v4.AddUnsignedPayloadMiddleware))
+	} else {
+		_, err = target.client.PutObject(ctx, input)
+	}
 	if err != nil {
-		return fmt.Errorf("put object %s: %w", key, err)
+		return fmt.Errorf("put object key=%s endpoint=%s bucket=%s content_type=%s cache_control=%s size=%d: %s",
+			key, target.endpoint, target.bucket, contentTypeFor(rel), cacheControlFor(rel), len(body), describeUploadError(err),
+		)
 	}
 	return nil
 }
@@ -207,7 +270,9 @@ func deleteRemoteFile(ctx context.Context, target *syncTarget, rel string) error
 		Key:    aws.String(key),
 	})
 	if err != nil {
-		return fmt.Errorf("delete object %s: %w", key, err)
+		return fmt.Errorf("delete object key=%s endpoint=%s bucket=%s: %s",
+			key, target.endpoint, target.bucket, describeUploadError(err),
+		)
 	}
 	return nil
 }
@@ -225,6 +290,61 @@ func staleRemoteFiles(remote, present map[string]struct{}) ([]string, error) {
 	return stale, nil
 }
 
+type s3LoggingTransport struct {
+	sessionID string
+	base      http.RoundTripper
+}
+
+func (t *s3LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if req != nil && (req.Method == http.MethodPut || req.Method == http.MethodDelete) {
+		log.Printf("[live %s] s3 request method=%s host=%s path=%s auth_scope=%s security_token_present=%t amz_date=%s content_sha256_present=%t",
+			t.sessionID,
+			req.Method,
+			req.URL.Host,
+			req.URL.Path,
+			formatAuthorizationScope(req.Header.Get("Authorization")),
+			req.Header.Get("X-Amz-Security-Token") != "",
+			req.Header.Get("X-Amz-Date"),
+			req.Header.Get("X-Amz-Content-Sha256") != "",
+		)
+	}
+	resp, err := base.RoundTrip(req)
+	if req != nil && (req.Method == http.MethodPut || req.Method == http.MethodDelete) {
+		if err != nil {
+			log.Printf("[live %s] s3 response method=%s host=%s path=%s transport_error=%q",
+				t.sessionID, req.Method, req.URL.Host, req.URL.Path, err,
+			)
+		} else {
+			log.Printf("[live %s] s3 response method=%s host=%s path=%s status=%d",
+				t.sessionID, req.Method, req.URL.Host, req.URL.Path, resp.StatusCode,
+			)
+		}
+	}
+	return resp, err
+}
+
+func formatAuthorizationScope(auth string) string {
+	const marker = "Credential="
+	idx := strings.Index(auth, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := auth[idx+len(marker):]
+	if end := strings.IndexByte(rest, ','); end >= 0 {
+		rest = rest[:end]
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	parts[0] = maskSecretSuffix(parts[0])
+	return strings.Join(parts, "/")
+}
+
 func sanitizeUploadError(rt *sessionRuntime, err error) string {
 	if err == nil {
 		return ""
@@ -234,6 +354,69 @@ func sanitizeUploadError(rt *sessionRuntime, err error) string {
 		secrets = append(secrets, cred.AccessKeyID, cred.SecretAccessKey, cred.SessionToken)
 	}
 	return redactSecrets(err.Error(), secrets...)
+}
+
+func describeUploadError(err error) string {
+	if err == nil {
+		return ""
+	}
+	parts := []string{err.Error()}
+
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		parts = append(parts, "api_code="+apiErr.ErrorCode())
+		if msg := strings.TrimSpace(apiErr.ErrorMessage()); msg != "" && msg != apiErr.Error() {
+			parts = append(parts, "api_message="+msg)
+		}
+	}
+	if statusErr, ok := err.(interface{ HTTPStatusCode() int }); ok && statusErr.HTTPStatusCode() > 0 {
+		parts = append(parts, fmt.Sprintf("http_status=%d", statusErr.HTTPStatusCode()))
+	}
+
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		parts = append(parts, "class=url_error")
+		if urlErr.Timeout() {
+			parts = append(parts, "timeout=true")
+		}
+		var dnsErr *net.DNSError
+		if errors.As(urlErr.Err, &dnsErr) {
+			parts = append(parts, "class=dns")
+			parts = append(parts, "dns_name="+dnsErr.Name)
+		}
+		var opErr *net.OpError
+		if errors.As(urlErr.Err, &opErr) {
+			parts = append(parts, "class=net_op")
+			parts = append(parts, "net_op="+opErr.Op)
+			parts = append(parts, "net_addr="+opErr.Addr.String())
+			if opErr.Timeout() {
+				parts = append(parts, "timeout=true")
+			}
+			var dnsErr *net.DNSError
+			if errors.As(opErr.Err, &dnsErr) {
+				parts = append(parts, "class=dns")
+				parts = append(parts, "dns_name="+dnsErr.Name)
+			}
+			var certErr x509.UnknownAuthorityError
+			if errors.As(opErr.Err, &certErr) {
+				parts = append(parts, "class=tls_unknown_authority")
+			}
+			var hostnameErr x509.HostnameError
+			if errors.As(opErr.Err, &hostnameErr) {
+				parts = append(parts, "class=tls_hostname")
+				if hostnameErr.Host != "" {
+					parts = append(parts, "tls_host="+hostnameErr.Host)
+				}
+			}
+			if errors.Is(opErr.Err, syscall.ECONNREFUSED) {
+				parts = append(parts, "class=conn_refused")
+			}
+			if errors.Is(opErr.Err, syscall.ENETUNREACH) || errors.Is(opErr.Err, syscall.EHOSTUNREACH) {
+				parts = append(parts, "class=unreachable")
+			}
+		}
+	}
+	return strings.Join(parts, " | ")
 }
 
 func cacheControlFor(name string) string {

@@ -47,6 +47,13 @@ func buildRuntimePlan(cfg config, rec sessionRecord, hw transcode.HWProfile) (bu
 func startFFmpeg(rt *sessionRuntime, plan buildRuntime, hw transcode.HWProfile) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, rt.cfg.FFmpegBin, plan.Args...)
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return cmd.Process.Signal(syscall.SIGTERM)
+	}
+	cmd.WaitDelay = 5 * time.Second
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
@@ -80,6 +87,9 @@ func startFFmpeg(rt *sessionRuntime, plan buildRuntime, hw transcode.HWProfile) 
 				if delta > 0 {
 					rt.event("session.usage.tick", total, delta, "", nil)
 				}
+				continue
+			}
+			if !shouldLogFFmpegLine(line) {
 				continue
 			}
 			stderrTail.add(line)
@@ -226,6 +236,43 @@ func buildLiveFFmpegArgs(inputURL string, outputDir string, preset transcode.ABR
 		filepath.Join(outputDir, "v%v", "playlist.m3u8"),
 	)
 	return args
+}
+
+func shouldLogFFmpegLine(line string) bool {
+	switch {
+	case strings.HasPrefix(line, "ffmpeg version "):
+		return false
+	case strings.HasPrefix(line, "built with gcc "):
+		return false
+	case strings.HasPrefix(line, "configuration: "):
+		return false
+	case strings.HasPrefix(line, "libav"):
+		return false
+	case strings.HasPrefix(line, "Input #"):
+		return false
+	case strings.HasPrefix(line, "Output #"):
+		return false
+	case strings.HasPrefix(line, "Duration:"):
+		return false
+	case strings.HasPrefix(line, "Stream mapping:"):
+		return false
+	case strings.HasPrefix(line, "Stream #"):
+		return false
+	case strings.HasPrefix(line, "Metadata:"):
+		return false
+	case strings.HasPrefix(line, "Side data:"):
+		return false
+	case strings.HasPrefix(line, "encoder         :"):
+		return false
+	case strings.HasPrefix(line, "Press [q] to stop"):
+		return false
+	case strings.Contains(line, "deprecated pixel format used"):
+		return false
+	case strings.Contains(line, "] Opening '") && strings.Contains(line, "/tmp/live/"):
+		return false
+	default:
+		return true
+	}
 }
 
 func filterGraphForPreset(preset transcode.ABRPreset) []string {
