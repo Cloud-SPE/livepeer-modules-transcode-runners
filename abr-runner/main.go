@@ -506,6 +506,7 @@ func runABRJob(job *ABRJob) {
 		sendWebhook(job, "job.error")
 		return
 	}
+	log.Printf("[job %s] probe streams: %s", job.ID, transcode.SummarizeProbeStreams(probeOutput))
 	job.setInputInfo(probe)
 	sendWebhook(job, "job.probed")
 
