@@ -129,23 +129,13 @@ func watchAndUpload(ctx context.Context, rt *sessionRuntime, target *syncTarget)
 			rt.recordOutputError(fmt.Errorf("%s", sanitized))
 			rt.emitUploadFailed(map[string]any{"error_text": sanitized})
 			if threshold := rt.cfg.OutputFailureThreshold; threshold > 0 && rt.outputFailureCount() >= uint64(threshold) {
-				rt.mu.Lock()
-				if rt.rec.State == statePublishing {
-					rt.setState(stateStalled, "output_sync_failed")
-				}
-				rt.mu.Unlock()
-				log.Printf("[live %s] output sync stalled session after %d consecutive failures endpoint=%s bucket=%s prefix=%s",
+				log.Printf("[live %s] output sync degraded after %d consecutive failures endpoint=%s bucket=%s prefix=%s",
 					rt.rec.RunnerSessionID, rt.outputFailureCount(), target.endpoint, target.bucket, target.prefix,
 				)
 			}
 		} else if ok && !healthy {
 			healthy = true
 			rt.clearUploadFailure()
-			rt.mu.Lock()
-			if rt.rec.State == stateStalled && rt.rec.CloseReason == "output_sync_failed" {
-				rt.setState(statePublishing, "")
-			}
-			rt.mu.Unlock()
 			log.Printf("[live %s] output sync recovered endpoint=%s bucket=%s prefix=%s",
 				rt.rec.RunnerSessionID, target.endpoint, target.bucket, target.prefix,
 			)

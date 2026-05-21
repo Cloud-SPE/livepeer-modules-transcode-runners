@@ -663,7 +663,7 @@ func TestGatewayIngestUploadFailureThresholdAndRecovery(t *testing.T) {
 	s3.failNextPutRequests(2)
 	waitForCondition(t, 3*time.Second, func() bool {
 		got := rt.query()
-		return got.State == stateStalled && got.Output.PutFailureCount >= 2 && got.Output.LastPutError != nil
+		return got.State == statePublishing && got.Output.PutFailureCount >= 2 && got.Output.LastPutError != nil
 	})
 
 	if err := os.WriteFile(masterPath, []byte("#EXTM3U\n#EXT-X-VERSION:3\n"), 0o644); err != nil {
