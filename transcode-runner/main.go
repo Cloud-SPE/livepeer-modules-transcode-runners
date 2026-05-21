@@ -478,6 +478,12 @@ func runJob(job *Job) {
 	job.setInputInfo(probe)
 	sendWebhook(job, "job.probed")
 
+	if err := transcode.ValidateVideoProbe(probe); err != nil {
+		job.setError(err, "INPUT_VALIDATION_ERROR")
+		sendWebhook(job, "job.error")
+		return
+	}
+
 	totalDuration, _ := transcode.ParseDuration(
 		fmt.Sprintf("%02d:%02d:%06.3f",
 			int(probe.Duration)/3600,

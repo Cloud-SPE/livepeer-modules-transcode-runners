@@ -510,6 +510,12 @@ func runABRJob(job *ABRJob) {
 	job.setInputInfo(probe)
 	sendWebhook(job, "job.probed")
 
+	if err := transcode.ValidateVideoProbe(probe); err != nil {
+		job.setError(err, "INPUT_VALIDATION_ERROR")
+		sendWebhook(job, "job.error")
+		return
+	}
+
 	if gpuStrict {
 		if err := transcode.ValidateStrictGPUInput(hw, probe.VideoCodec); err != nil {
 			job.setError(err, "GPU_STRICT_INPUT_ERROR")

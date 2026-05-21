@@ -8,11 +8,11 @@ import (
 type NVIDIAGeneration string
 
 const (
-	NVIDIAGenerationUnknown NVIDIAGeneration = "unknown"
-	NVIDIAGenerationPascal  NVIDIAGeneration = "pascal"
-	NVIDIAGenerationTuring  NVIDIAGeneration = "turing"
-	NVIDIAGenerationAmpere  NVIDIAGeneration = "ampere"
-	NVIDIAGenerationAda     NVIDIAGeneration = "ada"
+	NVIDIAGenerationUnknown   NVIDIAGeneration = "unknown"
+	NVIDIAGenerationPascal    NVIDIAGeneration = "pascal"
+	NVIDIAGenerationTuring    NVIDIAGeneration = "turing"
+	NVIDIAGenerationAmpere    NVIDIAGeneration = "ampere"
+	NVIDIAGenerationAda       NVIDIAGeneration = "ada"
 	NVIDIAGenerationBlackwell NVIDIAGeneration = "blackwell"
 )
 
@@ -87,6 +87,17 @@ func CanHardwareDecodeCodec(hw HWProfile, codec string) bool {
 	default:
 		return false
 	}
+}
+
+// ValidateVideoProbe rejects inputs that do not contain a usable video stream.
+func ValidateVideoProbe(probe ProbeResult) error {
+	if probe.VideoCodec == "" {
+		if probe.AudioCodec != "" {
+			return fmt.Errorf("input has no video stream (detected audio codec %q)", probe.AudioCodec)
+		}
+		return fmt.Errorf("input has no video stream")
+	}
+	return nil
 }
 
 // ValidateStrictGPUInput fails closed when the current host cannot sustain
