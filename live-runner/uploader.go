@@ -291,7 +291,8 @@ func (t *s3LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		base = http.DefaultTransport
 	}
 	if req != nil && (req.Method == http.MethodPut || req.Method == http.MethodDelete) {
-		log.Printf("[live %s] s3 request method=%s host=%s path=%s auth_scope=%s security_token_present=%t amz_date=%s content_sha256_present=%t",
+		contentSHA256 := req.Header.Get("X-Amz-Content-Sha256")
+		log.Printf("[live %s] s3 request method=%s host=%s path=%s auth_scope=%s security_token_present=%t amz_date=%s content_sha256_present=%t content_sha256=%q unsigned_payload=%t",
 			t.sessionID,
 			req.Method,
 			req.URL.Host,
@@ -299,7 +300,9 @@ func (t *s3LoggingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			formatAuthorizationScope(req.Header.Get("Authorization")),
 			req.Header.Get("X-Amz-Security-Token") != "",
 			req.Header.Get("X-Amz-Date"),
-			req.Header.Get("X-Amz-Content-Sha256") != "",
+			contentSHA256 != "",
+			contentSHA256,
+			contentSHA256 == "UNSIGNED-PAYLOAD",
 		)
 	}
 	resp, err := base.RoundTrip(req)

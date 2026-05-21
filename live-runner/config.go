@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -48,6 +49,29 @@ func loadConfig() config {
 		OutputSyncUnsignedPayload: envBool("OUTPUT_SYNC_UNSIGNED_PAYLOAD", false),
 		FFmpegBin:                 env("FFMPEG_BIN", "ffmpeg"),
 	}
+}
+
+func (c config) logFields() string {
+	return fmt.Sprintf(
+		"runner_addr=%s ingest_public_host=%s shared_ingest_addr=%s temp_dir=%s hls_window_segments=%d default_preset=%s presets_file_set=%t broker_token_set=%t session_no_publish_ttl=%s session_idle_ttl=%s callback_timeout=%s callback_interval=%s usage_tick_interval=%s output_sync_interval=%s output_failure_threshold=%d output_sync_unsigned_payload=%t ffmpeg_bin=%s",
+		c.RunnerAddr,
+		c.IngestPublicHost,
+		c.SharedIngestAddr,
+		c.TempDir,
+		c.HLSWindowSegments,
+		c.DefaultPreset,
+		strings.TrimSpace(c.PresetsFile) != "",
+		strings.TrimSpace(c.BrokerToken) != "",
+		c.SessionNoPublishTTL,
+		c.SessionIdleTTL,
+		c.CallbackTimeout,
+		c.CallbackInterval,
+		c.UsageTickInterval,
+		c.OutputSyncInterval,
+		c.OutputFailureThreshold,
+		c.OutputSyncUnsignedPayload,
+		c.FFmpegBin,
+	)
 }
 
 func (c config) sharedIngestPort() string {

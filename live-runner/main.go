@@ -8,10 +8,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	transcode "github.com/Cloud-SPE/livepeer-modules-transcode-runners/transcode-core"
 )
 
 func main() {
 	cfg := loadConfig()
+	log.Print(transcode.BuildSummary("live-runner"))
+	log.Printf("live-runner config %s", cfg.logFields())
 	srv, err := newServer(cfg)
 	if err != nil {
 		log.Fatalf("init live-runner: %v", err)
