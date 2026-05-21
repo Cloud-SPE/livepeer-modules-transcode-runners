@@ -291,7 +291,6 @@ func (s *server) run(ctx context.Context) error {
 		}
 	}()
 
-	log.Printf("%s", transcode.BuildSummary("live-runner"))
 	log.Printf("live runner listening on %s", s.cfg.RunnerAddr)
 	return httpSrv.ListenAndServe()
 }

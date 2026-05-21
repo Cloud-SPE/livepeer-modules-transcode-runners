@@ -12,7 +12,7 @@ images for NVIDIA, Intel, and AMD, and direct-runner smoke tooling.
 |---|---|---|
 | `transcode-runner-nvidia` / `-intel` / `-amd` | Single-rendition VOD transcode | `POST /v1/video/transcode` |
 | `abr-runner-nvidia` / `-intel` / `-amd` | Multi-rendition ABR ladder transcode | `POST /v1/video/transcode/abr` |
-| `live-runner-nvidia` / `-intel` / `-amd` | Live session runner for remote RTMP or gateway-ingest modes | `POST /v1/video/live/sessions` |
+| `live-runner-nvidia` / `-intel` / `-amd` | Live session runner for gateway-ingest RTMP and HLS push output | `POST /v1/video/live/sessions` |
 | `transcode-tester` | Node integration smoke harness | n/a |
 
 Shared code lives in [`transcode-core/`](./transcode-core). Build and runtime

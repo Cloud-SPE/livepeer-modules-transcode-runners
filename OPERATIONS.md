@@ -58,7 +58,8 @@ If you need best-effort development behavior, you can explicitly set `GPU_STRICT
 - Jobs are stored in memory only
 - `live-runner` sessions are stored in memory only
 - Scratch space lives under `/tmp/transcode`, `/tmp/abr`, or `/tmp/live`
-- Output upload targets must be pre-signed or otherwise writable URLs
+- VOD runners upload to caller-provided output URLs
+- `live-runner` uploads HLS artifacts to caller-supplied S3-compatible storage
 
 ## Live runner
 
@@ -71,7 +72,8 @@ Key runtime knobs:
 - `SESSION_NO_PUBLISH_TTL` — max wait for first RTMP publish
 - `SESSION_IDLE_TTL` — max stall window after publishing starts
 - `OUTPUT_SYNC_INTERVAL` — cadence for gateway-ingest S3 sync polling
-- `OUTPUT_FAILURE_THRESHOLD` — consecutive uploader failures before a publishing session stalls
+- `OUTPUT_FAILURE_THRESHOLD` — consecutive uploader failures before the runner marks output delivery as degraded in logs and session output status
+- `OUTPUT_SYNC_UNSIGNED_PAYLOAD` — when `true`, S3 upload requests use `UNSIGNED-PAYLOAD` instead of a signed body hash
 - `BROKER_AUTH_TOKEN` — optional bearer token required on the control API
 
 Ingress topology is fixed:
@@ -84,3 +86,8 @@ Operators should expose:
 
 - the HTTP control port
 - the shared RTMP ingest port
+
+Startup logging now prints:
+
+- runner build version, commit, and build time
+- effective non-secret runtime config, including whether `OUTPUT_SYNC_UNSIGNED_PAYLOAD` is enabled

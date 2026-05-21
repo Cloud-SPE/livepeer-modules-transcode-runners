@@ -21,7 +21,8 @@ Additional local `live-runner` coverage currently lives in Go unit tests:
 
 - session create/get/delete API
 - auth gate on the broker-facing API
-- HLS static serving
+- shared-ingest publish acceptance and rejection
+- HLS upload and segment deletion against a fake S3-compatible target
 - session store and watchdog behavior
 
 The direct-runner mode is intentional for this repo: no proxy or broker shim is

@@ -37,6 +37,12 @@ For `live-runner`, the shape is session-oriented instead:
 5. runner emits heartbeat, publish, upload, and usage events back to the broker
 6. broker closes the runner session over HTTP when the live session ends
 
+Ingest lifecycle and output lifecycle are intentionally separate:
+
+- publisher disconnects and idle timeouts drive live session state
+- S3 upload failures degrade output health and emit upload failure events, but do
+  not transition the ingest session out of `publishing` on their own
+
 Job state is in-memory only. Restarts lose active and historical job state.
 
 ## Image strategy
