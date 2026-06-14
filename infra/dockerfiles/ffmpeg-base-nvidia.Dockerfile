@@ -1,6 +1,10 @@
 ARG REGISTRY=localbuild
-ARG TAG=v1.3.1
-ARG CUDA_VERSION=13.2.1
+ARG TAG=v1.4.1
+# CUDA 12.x is the last line that still compiles for Pascal (sm_61, e.g.
+# GTX 1080). CUDA 13 dropped it ("nvcc fatal: Unsupported gpu
+# architecture 'compute_61'"). The 580+ host driver runs 12.x runtimes
+# fine (forward-compatible). Don't bump to 13.x while Pascal is in the fleet.
+ARG CUDA_VERSION=12.8.1
 ARG UBUNTU_VERSION=24.04
 ARG CODECS_IMAGE=${REGISTRY}/codecs-builder:${TAG}
 
@@ -57,7 +61,13 @@ RUN git clone --depth 1 --branch n7.1.3 https://github.com/FFmpeg/FFmpeg.git \
         --enable-libvpx \
         --enable-libzimg \
         --enable-shared \
-        --nvccflags="-gencode arch=compute_75,code=sm_75 -O2" \
+        # ffmpeg compiles its CUDA kernels to PTX (it appends -ptx), which
+        # forbids multiple -gencode entries AND is forward-compatible only.
+        # So target ONE low virtual arch = the oldest GPU in the fleet
+        # (compute_61 / GTX 1080); the driver JITs that PTX up for any newer
+        # card (2080/sm_75, Ampere, Ada). compute_75-only PTX could NOT run
+        # on the 1080 — that was the segfault. Needs CUDA 12.x: 13 dropped sm_61.
+        --nvccflags="-gencode arch=compute_61,code=sm_61 -O2 -Wno-deprecated-gpu-targets" \
         --extra-cflags="-I/usr/local/include -I/usr/local/cuda/include" \
         --extra-ldflags="-L/usr/local/lib -L/usr/local/cuda/lib64" \
     && make -j"$(nproc)" \
