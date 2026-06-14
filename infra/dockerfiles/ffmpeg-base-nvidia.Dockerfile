@@ -1,6 +1,10 @@
 ARG REGISTRY=localbuild
-ARG TAG=v1.3.1
-ARG CUDA_VERSION=13.2.1
+ARG TAG=v1.4.1
+# CUDA 12.x is the last line that still compiles for Pascal (sm_61, e.g.
+# GTX 1080). CUDA 13 dropped it ("nvcc fatal: Unsupported gpu
+# architecture 'compute_61'"). The 580+ host driver runs 12.x runtimes
+# fine (forward-compatible). Don't bump to 13.x while Pascal is in the fleet.
+ARG CUDA_VERSION=12.8.1
 ARG UBUNTU_VERSION=24.04
 ARG CODECS_IMAGE=${REGISTRY}/codecs-builder:${TAG}
 
