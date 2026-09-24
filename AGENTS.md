@@ -36,6 +36,7 @@ Repo-specific principles:
 | Runtime operations | [`OPERATIONS.md`](./OPERATIONS.md) |
 | Test strategy | [`TESTING.md`](./TESTING.md) |
 | Security expectations | [`SECURITY.md`](./SECURITY.md) |
+| Work tracking and Beads setup | [`WORKFLOW.md`](./WORKFLOW.md) |
 | Harness reference | [`docs/references/openai-harness-engineer.md`](./docs/references/openai-harness-engineer.md) |
 
 ## Components
@@ -52,6 +53,24 @@ Repo-specific principles:
 - `infra/presets/` — operator-editable preset YAMLs
 
 ## Doing work in this repo
+
+- Use Beads (`bd`) for all work tracking: features, bugs, chores, investigations,
+  documentation, plans, and discovered follow-ups. Read the project
+  [Beads skill](./.agents/skills/beads/SKILL.md) before starting work.
+- Run `bd prime` at session start and after compaction, then inspect
+  `bd ready --json` and `bd list --status in_progress --json`.
+- Create or find a bead before changing files, claim it with
+  `bd update <id> --claim`, and record progress, dependencies, and validation
+  there. Close completed work with a reason; leave unfinished work with handoff
+  notes. Use `--json` for output that you parse.
+- Beads is the only task/status tracker. Keep design and reference documents in
+  Markdown, linked from beads; do not maintain parallel Markdown backlogs,
+  TODO lists, or plan progress checklists. This overrides the reference
+  article's Markdown tracking examples.
+- Review imported beads labeled `needs-status-review` against current code
+  before implementing them; their original backlog had no completion status.
+- If `bd` is unavailable, repair/bootstrap it using `WORKFLOW.md` before
+  starting tracked work. Do not silently fall back to another tracker.
 
 - Build all images with `./build-images.sh build`
 - Validate compose overlays with `./build-images.sh validate`

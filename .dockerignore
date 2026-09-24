@@ -1,0 +1,5 @@
+# Agent tooling and the local work-tracking database are not build inputs.
+.git/
+.beads/
+.agents/
+.codex/

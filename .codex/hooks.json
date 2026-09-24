@@ -1,0 +1,51 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd codex-hook SessionStart",
+            "statusMessage": "Loading Beads context"
+          }
+        ],
+        "matcher": "startup|resume|clear"
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd codex-hook PreCompact",
+            "statusMessage": "Checking Beads context"
+          }
+        ],
+        "matcher": "manual|auto"
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd codex-hook PostCompact",
+            "statusMessage": "Scheduling Beads context refresh"
+          }
+        ],
+        "matcher": "manual|auto"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd codex-hook UserPromptSubmit",
+            "statusMessage": "Refreshing Beads context"
+          }
+        ]
+      }
+    ]
+  }
+}

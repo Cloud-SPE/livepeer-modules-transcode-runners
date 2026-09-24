@@ -1,7 +1,8 @@
 ---
 plan: 0001
 title: Live Option B remote runner
-status: active
+status: reference
+beads_epic: runners-x8e
 phase: design
 opened: 2026-05-20
 owner: harness
@@ -13,6 +14,10 @@ related:
 ---
 
 # Plan 0001 — Live Option B remote runner
+
+> Historical design reference. Work, status, dependencies, and handoffs are
+> tracked in Beads epic `runners-x8e`; see [WORKFLOW.md](../../../WORKFLOW.md).
+> Validate this original design against the current implementation before use.
 
 ## 1. Goal
 

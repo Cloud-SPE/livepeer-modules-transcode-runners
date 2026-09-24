@@ -6,6 +6,9 @@ images for NVIDIA, Intel, and AMD, and direct-runner smoke tooling.
 
 > **For agents:** start at [`AGENTS.md`](./AGENTS.md).
 
+All project work is tracked in Beads (`bd`). See [`WORKFLOW.md`](./WORKFLOW.md)
+for setup, the daily workflow, and synchronization.
+
 ## What this repo ships
 
 | Image | Purpose | Default endpoint |
