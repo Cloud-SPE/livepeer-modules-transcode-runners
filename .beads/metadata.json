@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "runners",
+  "project_id": "1781a2bd-1c75-445e-9fb0-d69e3fe6e457"
+}
