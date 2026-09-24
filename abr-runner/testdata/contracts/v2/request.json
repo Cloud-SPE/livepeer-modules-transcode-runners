@@ -1,0 +1,49 @@
+{
+  "schema": "video-transcode-abr/v2",
+  "workload_id": "asset-fixture-001",
+  "input": {
+    "download_url": "https://storage.example/input.mp4?sig=input&expires=9999999999",
+    "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "ladder": {
+    "preset": "abr-fixture"
+  },
+  "output": {
+    "manifest": {
+      "artifact_uri": "vod/asset-fixture-001/master.m3u8",
+      "upload_url": "https://storage.example/master.m3u8?sig=manifest"
+    },
+    "renditions": {
+      "360p": {
+        "playlist": {
+          "artifact_uri": "vod/asset-fixture-001/360p/playlist.m3u8",
+          "upload_url": "https://storage.example/360p/playlist.m3u8?sig=playlist360"
+        },
+        "stream": {
+          "artifact_uri": "vod/asset-fixture-001/360p/stream.mp4",
+          "upload_url": "https://storage.example/360p/stream.mp4?sig=stream360"
+        }
+      },
+      "720p": {
+        "playlist": {
+          "artifact_uri": "vod/asset-fixture-001/720p/playlist.m3u8",
+          "upload_url": "https://storage.example/720p/playlist.m3u8?sig=playlist720"
+        },
+        "stream": {
+          "artifact_uri": "vod/asset-fixture-001/720p/stream.mp4",
+          "upload_url": "https://storage.example/720p/stream.mp4?sig=stream720"
+        }
+      },
+      "audio-only": {
+        "playlist": {
+          "artifact_uri": "vod/asset-fixture-001/audio/playlist.m3u8",
+          "upload_url": "https://storage.example/audio/playlist.m3u8?sig=playlistAudio"
+        },
+        "stream": {
+          "artifact_uri": "vod/asset-fixture-001/audio/stream.mp4",
+          "upload_url": "https://storage.example/audio/stream.mp4?sig=streamAudio"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "runner_session_id": "runner_session_001",
+  "state": "active",
+  "usage": { "unit": "output_seconds", "total": 17 },
+  "last_sequence": 3,
+  "output_state": "producing",
+  "callback_rejected_total": 1,
+  "last_callback_rejection": {
+    "event_type": "session.heartbeat",
+    "status_code": 409,
+    "error_code": "event_not_supported",
+    "rejected_at": "2026-08-23T12:00:11Z"
+  }
+}

@@ -4,6 +4,7 @@
 # Subcommands:
 #   build [name ...]   Build all images, or a named subset.
 #   push  [name ...]   Push deployable runner images to ${REGISTRY}.
+#   test               Run Go tests, race checks and vet in Docker.
 #   validate           Run `docker compose config` against every overlay in infra/compose/.
 #   clean              Remove locally-built images for ${REGISTRY}/${TAG}.
 #   help               Show this help.
@@ -11,7 +12,7 @@
 # Environment:
 #   REGISTRY        Docker registry prefix for deployable runner images (default: tztcloud)
 #   INTERNAL_REGISTRY  Local/internal prefix for build-only base images (default: localbuild)
-#   TAG             Image tag (default: v1.4.1)
+#   TAG             Image tag (default: v2-local)
 #   CUDA_VERSION    NVIDIA CUDA tag (default: 12.8.1 — last line supporting Pascal/sm_61)
 #   UBUNTU_VERSION  Ubuntu version (default: 24.04)
 #   GO_VERSION      Go toolchain (default: 1.25.7)
@@ -24,7 +25,7 @@ cd "$ROOT"
 
 REGISTRY="${REGISTRY:-tztcloud}"
 INTERNAL_REGISTRY="${INTERNAL_REGISTRY:-localbuild}"
-TAG="${TAG:-v1.4.1}"
+TAG="${TAG:-v2-local}"
 CUDA_VERSION="${CUDA_VERSION:-12.8.1}"
 UBUNTU_VERSION="${UBUNTU_VERSION:-24.04}"
 GO_VERSION="${GO_VERSION:-1.25.7}"
@@ -110,6 +111,8 @@ build_runner() {
   local runner_dir="$3"
   local bin_name="$4"
   local preset_name="$5"
+  local runner_package="$runner_dir"
+  if [ "$runner_dir" = live-runner ]; then runner_package=live-runner/cmd/live-runner; fi
   docker build \
     --build-arg "REGISTRY=${REGISTRY}" \
     --build-arg "TAG=${TAG}" \
@@ -119,6 +122,8 @@ build_runner() {
     --build-arg "BUILD_TIME=${BUILD_TIME}" \
     --build-arg "BASE_IMAGE=$(internal_tag "${base_name}")" \
     --build-arg "RUNNER_DIR=${runner_dir}" \
+    --build-arg "RUNNER_PACKAGE=${runner_package}" \
+    --build-arg "HARDWARE=${image_name##*-}" \
     --build-arg "BINARY_NAME=${bin_name}" \
     --build-arg "PRESET_NAME=${preset_name}" \
     -t "$(deploy_tag "${image_name}")" \
@@ -181,6 +186,13 @@ cmd_push() {
   done
 }
 
+cmd_test() {
+  docker run --rm -v "$ROOT:/src" -w /src "golang:${GO_VERSION}" \
+    sh -c 'go test -race ./... && go vet ./... && go build ./...'
+  docker run --rm -v "$ROOT/transcode-tester:/app:ro" -w /app \
+    "node:${NODE_VERSION}-alpine" node --test sse.test.mjs
+}
+
 cmd_validate() {
   echo "==> Validating compose snippets in infra/compose/"
   shopt -s nullglob
@@ -211,6 +223,7 @@ shift || true
 case "${cmd}" in
   build) cmd_build "$@" ;;
   push) cmd_push "$@" ;;
+  test) cmd_test ;;
   validate) cmd_validate ;;
   clean) cmd_clean ;;
   help|-h|--help) cmd_help ;;

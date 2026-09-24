@@ -1,0 +1,5 @@
+event: progress
+id: 7
+data: {"schema":"video-transcode-abr-progress/v2","workload_id":"asset-fixture-001","request_sha256":"6ec51df51598e35eb851973ab08d2904fc3b3eed948fb211fa39b0a20a9bdef0","sequence":7,"phase":"encoding","overall_progress":42.5,"rendition":"720p","frames":128}
+
+: keepalive

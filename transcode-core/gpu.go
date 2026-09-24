@@ -2,7 +2,6 @@ package transcode
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -32,200 +31,153 @@ type HWProfile struct {
 	MaxSessions int       `json:"max_sessions"`
 }
 
-type GPUDetectionReport struct {
-	HWProfile
-	Detected bool     `json:"detected"`
-	Messages []string `json:"messages,omitempty"`
-}
-
 // DetectGPU probes the system for GPU capabilities.
 // Cascading detection: NVIDIA → Intel → AMD → software-only.
 func DetectGPU() HWProfile {
-	report := DetectGPUReport()
-	return report.HWProfile
+	if hw, ok := detectNVIDIA(); ok {
+		return hw
+	}
+	if hw, ok := detectIntel(); ok {
+		return hw
+	}
+	if hw, ok := detectAMD(); ok {
+		return hw
+	}
+	return HWProfile{}
 }
 
-// DetectGPUReport returns both the chosen hardware profile and detailed
-// diagnostics for startup logging.
-func DetectGPUReport() GPUDetectionReport {
-	nvidia := detectNVIDIAReport()
-	if nvidia.Detected {
-		return nvidia
-	}
-	intel := detectIntelReport()
-	if intel.Detected {
-		return intel
-	}
-	amd := detectAMDReport()
-	if amd.Detected {
-		return amd
-	}
+// detectNVIDIA probes for NVIDIA GPU via nvidia-smi and ffmpeg.
+func detectNVIDIA() (HWProfile, bool) {
+	hw := HWProfile{Vendor: VendorNVIDIA}
 
-	messages := make([]string, 0, len(nvidia.Messages)+len(intel.Messages)+len(amd.Messages)+1)
-	messages = append(messages, nvidia.Messages...)
-	messages = append(messages, intel.Messages...)
-	messages = append(messages, amd.Messages...)
-	if len(messages) == 0 {
-		messages = append(messages, "no usable GPU runtime detected")
-	}
-	return GPUDetectionReport{
-		Messages: messages,
-	}
-}
-
-func detectNVIDIAReport() GPUDetectionReport {
-	report := GPUDetectionReport{HWProfile: HWProfile{Vendor: VendorNVIDIA}}
 	out, err := runCmd("nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits")
 	if err != nil {
-		report.Messages = append(report.Messages, "nvidia-smi query failed: "+err.Error())
-		return report
+		return HWProfile{}, false
 	}
 
 	parts := strings.SplitN(strings.TrimSpace(out), ", ", 2)
 	if len(parts) == 2 {
-		report.GPUName = strings.TrimSpace(parts[0])
+		hw.GPUName = strings.TrimSpace(parts[0])
 		if vram, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
-			report.VRAM_MB = vram
+			hw.VRAM_MB = vram
 		}
 	}
-	report.Messages = append(report.Messages, "nvidia-smi detected "+report.GPUName)
 
+	// Query available hardware accelerators
 	if out, err := runCmd("ffmpeg", "-hwaccels"); err == nil {
 		for _, line := range strings.Split(out, "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" && line != "Hardware acceleration methods:" {
-				report.HWAccels = append(report.HWAccels, line)
+				hw.HWAccels = append(hw.HWAccels, line)
 			}
 		}
-	} else {
-		report.Messages = append(report.Messages, "ffmpeg -hwaccels failed: "+err.Error())
 	}
 
-	report.Encoders = probeEncodersByPattern("nvenc", "nv_")
-	if len(report.Encoders) == 0 {
-		report.Messages = append(report.Messages, "no NVIDIA encoders reported by ffmpeg")
-	}
+	// Query available NVENC encoders
+	hw.Encoders = probeEncodersByPattern("nvenc", "nv_")
 
+	// Query available CUVID/NVDEC decoders
 	if out, err := runCmd("ffmpeg", "-decoders"); err == nil {
 		for _, line := range strings.Split(out, "\n") {
 			if strings.Contains(line, "cuvid") || strings.Contains(line, "nv_") {
 				fields := strings.Fields(line)
 				if len(fields) >= 2 {
-					report.Decoders = append(report.Decoders, fields[1])
+					hw.Decoders = append(hw.Decoders, fields[1])
 				}
 			}
 		}
-	} else {
-		report.Messages = append(report.Messages, "ffmpeg -decoders failed: "+err.Error())
 	}
 
-	report.MaxSessions = maxSessionsForGPU(report.GPUName, report.Vendor)
-	report.HWProfile = filterNVIDIACapabilities(report.HWProfile)
-	if ok, reason := nvidiaRuntimeHealthy(); !ok {
-		report.Messages = append(report.Messages, "nvidia runtime sanity check failed: "+reason)
-		return report
-	}
-	if report.GPUName == "" || len(report.Encoders) == 0 {
-		report.Messages = append(report.Messages, "NVIDIA card found but no usable hardware encoders remained after filtering")
-		return report
-	}
-	report.Detected = true
-	report.Messages = append(report.Messages, "nvidia runtime sanity check passed")
-	return report
+	hw.MaxSessions = maxSessionsForGPU(hw.GPUName, hw.Vendor)
+	return hw, hw.GPUName != "" && len(hw.Encoders) > 0
 }
 
-func detectIntelReport() GPUDetectionReport {
-	report := GPUDetectionReport{HWProfile: HWProfile{Vendor: VendorIntel}}
+// detectIntel probes for Intel GPU via vainfo looking for iHD or i965 driver.
+func detectIntel() (HWProfile, bool) {
 	out, err := runCmd("vainfo")
 	if err != nil {
-		report.Messages = append(report.Messages, "vainfo failed: "+err.Error())
-		return report
+		return HWProfile{}, false
 	}
-	if !strings.Contains(out, "iHD") && !strings.Contains(out, "i965") {
-		report.Messages = append(report.Messages, "vainfo did not report an Intel VAAPI driver")
-		return report
-	}
-	report.DevicePath = detectVAAPIDevice()
-	report.GPUName = parseVAInfoGPUName(out)
-	report.Messages = append(report.Messages, "vainfo detected "+report.GPUName)
 
+	// Check for Intel driver
+	if !strings.Contains(out, "iHD") && !strings.Contains(out, "i965") {
+		return HWProfile{}, false
+	}
+
+	hw := HWProfile{
+		Vendor:     VendorIntel,
+		DevicePath: detectVAAPIDevice(),
+	}
+
+	// Parse GPU name from vainfo output
+	hw.GPUName = parseVAInfoGPUName(out)
+
+	// Query available hardware accelerators
 	if hwaOut, err := runCmd("ffmpeg", "-hwaccels"); err == nil {
 		for _, line := range strings.Split(hwaOut, "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" && line != "Hardware acceleration methods:" {
-				report.HWAccels = append(report.HWAccels, line)
+				hw.HWAccels = append(hw.HWAccels, line)
 			}
 		}
-	} else {
-		report.Messages = append(report.Messages, "ffmpeg -hwaccels failed: "+err.Error())
 	}
-	report.Encoders = probeEncodersByPattern("_qsv", "_vaapi")
+
+	// Probe QSV and VAAPI encoders
+	hw.Encoders = probeEncodersByPattern("_qsv", "_vaapi")
+
+	// Probe QSV decoders
 	if decOut, err := runCmd("ffmpeg", "-decoders"); err == nil {
 		for _, line := range strings.Split(decOut, "\n") {
 			if strings.Contains(line, "_qsv") {
 				fields := strings.Fields(line)
 				if len(fields) >= 2 {
-					report.Decoders = append(report.Decoders, fields[1])
+					hw.Decoders = append(hw.Decoders, fields[1])
 				}
 			}
 		}
 	}
-	report.MaxSessions = maxSessionsForGPU(report.GPUName, report.Vendor)
-	report.Detected = report.GPUName != "" && len(report.Encoders) > 0
-	if !report.Detected {
-		report.Messages = append(report.Messages, "Intel GPU found but no usable hardware encoders detected")
-	}
-	return report
+
+	hw.MaxSessions = maxSessionsForGPU(hw.GPUName, hw.Vendor)
+	return hw, hw.GPUName != "" && len(hw.Encoders) > 0
 }
 
-func detectAMDReport() GPUDetectionReport {
-	report := GPUDetectionReport{HWProfile: HWProfile{Vendor: VendorAMD}}
+// detectAMD probes for AMD GPU via vainfo looking for radeonsi or AMDGPU driver.
+func detectAMD() (HWProfile, bool) {
 	out, err := runCmd("vainfo")
 	if err != nil {
-		report.Messages = append(report.Messages, "vainfo failed: "+err.Error())
-		return report
+		return HWProfile{}, false
 	}
-	if !strings.Contains(out, "radeonsi") && !strings.Contains(out, "AMDGPU") {
-		report.Messages = append(report.Messages, "vainfo did not report an AMD VAAPI driver")
-		return report
-	}
-	report.DevicePath = detectVAAPIDevice()
-	report.GPUName = parseVAInfoGPUName(out)
-	report.Messages = append(report.Messages, "vainfo detected "+report.GPUName)
 
+	// Check for AMD driver
+	if !strings.Contains(out, "radeonsi") && !strings.Contains(out, "AMDGPU") {
+		return HWProfile{}, false
+	}
+
+	hw := HWProfile{
+		Vendor:     VendorAMD,
+		DevicePath: detectVAAPIDevice(),
+	}
+
+	// Parse GPU name from vainfo output
+	hw.GPUName = parseVAInfoGPUName(out)
+
+	// Query available hardware accelerators
 	if hwaOut, err := runCmd("ffmpeg", "-hwaccels"); err == nil {
 		for _, line := range strings.Split(hwaOut, "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" && line != "Hardware acceleration methods:" {
-				report.HWAccels = append(report.HWAccels, line)
+				hw.HWAccels = append(hw.HWAccels, line)
 			}
 		}
-	} else {
-		report.Messages = append(report.Messages, "ffmpeg -hwaccels failed: "+err.Error())
 	}
-	report.Encoders = probeEncodersByPattern("_vaapi")
-	report.MaxSessions = maxSessionsForGPU(report.GPUName, report.Vendor)
-	report.Detected = report.GPUName != "" && len(report.Encoders) > 0
-	if !report.Detected {
-		report.Messages = append(report.Messages, "AMD GPU found but no usable hardware encoders detected")
-	}
-	return report
-}
 
-// Deprecated simple detectors kept for existing call sites.
-func detectNVIDIA() (HWProfile, bool) {
-	report := detectNVIDIAReport()
-	return report.HWProfile, report.Detected
-}
+	// Probe VAAPI encoders
+	hw.Encoders = probeEncodersByPattern("_vaapi")
 
-func detectIntel() (HWProfile, bool) {
-	report := detectIntelReport()
-	return report.HWProfile, report.Detected
-}
+	// AMD uses VAAPI decoders (handled by ffmpeg's vaapi hwaccel, no explicit decoder needed)
 
-func detectAMD() (HWProfile, bool) {
-	report := detectAMDReport()
-	return report.HWProfile, report.Detected
+	hw.MaxSessions = maxSessionsForGPU(hw.GPUName, hw.Vendor)
+	return hw, hw.GPUName != "" && len(hw.Encoders) > 0
 }
 
 // detectVAAPIDevice finds the first DRI render node, falling back to /dev/dri/renderD128.
@@ -342,66 +294,4 @@ func runCmd(name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.Output()
 	return string(out), err
-}
-
-func nvidiaRuntimeHealthy() (bool, string) {
-	tmpDir, err := os.MkdirTemp("", "transcode-gpucheck-*")
-	if err != nil {
-		return false, "create temp dir: " + err.Error()
-	}
-	defer os.RemoveAll(tmpDir)
-
-	inputPath := filepath.Join(tmpDir, "input.mp4")
-
-	// First, generate a small but realistic YUV420p H.264 sample via software.
-	// This mirrors go-livepeer's approach of testing a real transcode path rather
-	// than relying on a synthetic encoder-only probe.
-	genCtx, genCancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer genCancel()
-	genCmd := exec.CommandContext(genCtx, "ffmpeg",
-		"-v", "error",
-		"-f", "lavfi",
-		"-i", "testsrc2=size=640x360:rate=30",
-		"-frames:v", "30",
-		"-pix_fmt", "yuv420p",
-		"-c:v", "libx264",
-		"-preset", "veryfast",
-		"-movflags", "+faststart",
-		inputPath,
-	)
-	if out, err := genCmd.CombinedOutput(); err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		return false, "generate sample: " + msg
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "ffmpeg",
-		"-v", "error",
-		"-hwaccel", "cuda",
-		"-hwaccel_output_format", "cuda",
-		"-c:v", "h264_cuvid",
-		"-i", inputPath,
-		"-frames:v", "1",
-		"-c:v", "h264_nvenc",
-		"-preset", "p4",
-		"-tune", "hq",
-		"-b:v", "2M",
-		"-maxrate", "2M",
-		"-bufsize", "4M",
-		"-f", "null",
-		"-",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		return false, msg
-	}
-	return true, ""
 }

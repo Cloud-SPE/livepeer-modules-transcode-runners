@@ -1,0 +1,5 @@
+{
+  "request_id": "key_issue_001",
+  "stream_key": "runner-stream-key-fixture",
+  "expires_at": "2030-01-01T00:00:00Z"
+}

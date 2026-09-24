@@ -1,6 +1,7 @@
 package transcode
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -20,14 +21,25 @@ func HLSRenditionCmd(
 	hw HWProfile,
 	probe ProbeResult,
 ) *exec.Cmd {
+	return HLSRenditionCmdContext(context.Background(), inputPath, outputDir, rendition, segmentDuration, hw, probe)
+}
+
+// HLSRenditionCmdContext is HLSRenditionCmd with process cancellation tied to
+// ctx. Long-running paid exchanges use it so a disconnected request stops
+// FFmpeg rather than leaving unclaimed work behind.
+func HLSRenditionCmdContext(
+	ctx context.Context,
+	inputPath string,
+	outputDir string,
+	rendition ABRRendition,
+	segmentDuration int,
+	hw HWProfile,
+	probe ProbeResult,
+) *exec.Cmd {
 	args := []string{"-y"}
 
-	// Only request hardware decode when the detected GPU can decode the probed
-	// input codec. Otherwise let ffmpeg stay on software decode and still use
-	// the GPU encoder when available.
-	if DecoderForCodec(probe.VideoCodec, hw) != "" {
-		args = append(args, buildHWAccelInputArgsForCodec(probe.VideoCodec, hw)...)
-	}
+	// Hardware acceleration input
+	args = append(args, buildHWAccelInputArgs(hw)...)
 
 	args = append(args, "-i", inputPath)
 
@@ -58,7 +70,7 @@ func HLSRenditionCmd(
 	// Output playlist path
 	args = append(args, filepath.Join(outputDir, "playlist.m3u8"))
 
-	return exec.Command("ffmpeg", args...)
+	return exec.CommandContext(ctx, "ffmpeg", args...)
 }
 
 // buildHLSVideoArgs constructs video encoding arguments for an HLS rendition.
@@ -146,11 +158,16 @@ func buildHLSFilterGraph(rendition ABRRendition, hw HWProfile, probe ProbeResult
 
 	switch hw.Vendor {
 	case VendorNVIDIA:
-		// Upload software-decoded frames to GPU before scale_cuda.
-		// This handles the common case where CUDA hwaccel decode fails
-		// (e.g. too many decode surfaces) and ffmpeg falls back to CPU decode.
-		if hw.HasHWAccel("cuda") && DecoderForCodec(probe.VideoCodec, hw) == "" {
-			filters = append(filters, "format=nv12", "hwupload_cuda")
+		// Put the frames on the GPU before scale_cuda, whichever way they
+		// were decoded. The generic hwupload passes a frame that is already
+		// a CUDA frame (hwaccel decode with -hwaccel_output_format cuda)
+		// straight through and uploads a software frame (CUDA decode fell
+		// back to CPU, e.g. too many decode surfaces). hwupload_cuda is not
+		// that filter: it only accepts software frames and fails the encode
+		// with "Invalid argument" on a hardware-decoded input — which was
+		// every ABR rendition that needed scaling on a GTX 1080.
+		if hw.HasHWAccel("cuda") {
+			filters = append(filters, "hwupload")
 		}
 	case VendorAMD:
 		// AMD VAAPI requires hwupload before scale

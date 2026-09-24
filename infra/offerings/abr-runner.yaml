@@ -1,16 +1,11 @@
-capability: video-transcode-abr
-description: |
-  Multi-rendition ABR ladder runner. Produces HLS-oriented adaptive bitrate
-  outputs with per-rendition upload URLs and caller-polled job status.
-
-offerings:
-  - name: transcode-abr
-    description: ABR ladder transcode
-    methods:
-      - POST /v1/video/transcode/abr
-    status_method:
-      - POST /v1/video/transcode/abr/status
-    presets_method:
-      - GET /v1/video/transcode/abr/presets
-    rate_card_hints:
-      unit: video_seconds
+# Operator reference; authoritative attach document is served by the runner.
+capability_id: video:transcode.abr
+protocol: paid-job/v1
+transports: [stream]
+work_unit:
+  name: video-frame-megapixel
+  extractor: {type: response-trailer, trailer: X-Livepeer-Work-Units}
+paths: {invoke: /v1/video/transcode/abr}
+readiness: {type: http-status, path: /healthz}
+identity: {provider: abr-runner}
+schema_versions: {paid-job/v1: 1.0.15, video-transcode-abr/v2: 2.0.0}

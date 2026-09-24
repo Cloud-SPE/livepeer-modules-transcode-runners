@@ -1,3 +1,5 @@
+> Historical v0 design. The implementation was replaced by the Modules v2 contracts described in [MODULES-V2.md](../../../MODULES-V2.md). Work status lives in Beads; this document is retained only as a design reference.
+
 ---
 plan: 0001
 title: Live Option B remote runner

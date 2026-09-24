@@ -86,139 +86,6 @@ func TestParseProbeOutput_Invalid(t *testing.T) {
 	}
 }
 
-func TestParseProbeOutput_SkipsAttachedPicVideoStream(t *testing.T) {
-	jsonData := []byte(`{
-		"streams": [
-			{
-				"codec_type": "video",
-				"codec_name": "mjpeg",
-				"width": 600,
-				"height": 600,
-				"disposition": {
-					"attached_pic": 1
-				}
-			},
-			{
-				"codec_type": "video",
-				"codec_name": "h264",
-				"width": 1920,
-				"height": 1080,
-				"pix_fmt": "yuv420p",
-				"r_frame_rate": "30000/1001",
-				"avg_frame_rate": "30000/1001",
-				"disposition": {
-					"attached_pic": 0
-				}
-			}
-		],
-		"format": {
-			"duration": "120.5",
-			"bit_rate": "5000000"
-		}
-	}`)
-
-	result, err := ParseProbeOutput(jsonData)
-	if err != nil {
-		t.Fatalf("ParseProbeOutput() error: %v", err)
-	}
-
-	if result.VideoCodec != "h264" {
-		t.Errorf("VideoCodec = %q, want h264", result.VideoCodec)
-	}
-	if result.Width != 1920 || result.Height != 1080 {
-		t.Errorf("Dimensions = %dx%d, want 1920x1080", result.Width, result.Height)
-	}
-}
-
-func TestParseProbeOutput_PrefersVideoStreamWithCodec(t *testing.T) {
-	jsonData := []byte(`{
-		"streams": [
-			{
-				"codec_type": "video",
-				"codec_name": "",
-				"width": 0,
-				"height": 0,
-				"disposition": {
-					"attached_pic": 0
-				}
-			},
-			{
-				"codec_type": "video",
-				"codec_name": "vp9",
-				"width": 1280,
-				"height": 720,
-				"pix_fmt": "yuv420p",
-				"r_frame_rate": "30/1",
-				"avg_frame_rate": "30/1",
-				"disposition": {
-					"attached_pic": 0
-				}
-			}
-		],
-		"format": {
-			"duration": "30.0",
-			"bit_rate": "2500000"
-		}
-	}`)
-
-	result, err := ParseProbeOutput(jsonData)
-	if err != nil {
-		t.Fatalf("ParseProbeOutput() error: %v", err)
-	}
-
-	if result.VideoCodec != "vp9" {
-		t.Errorf("VideoCodec = %q, want vp9", result.VideoCodec)
-	}
-	if result.Width != 1280 || result.Height != 720 {
-		t.Errorf("Dimensions = %dx%d, want 1280x720", result.Width, result.Height)
-	}
-}
-
-func TestSummarizeProbeStreams(t *testing.T) {
-	jsonData := []byte(`{
-		"streams": [
-			{
-				"codec_type": "video",
-				"codec_name": "mjpeg",
-				"width": 600,
-				"height": 600,
-				"pix_fmt": "yuvj420p",
-				"disposition": {
-					"attached_pic": 1
-				}
-			},
-			{
-				"codec_type": "video",
-				"codec_name": "h264",
-				"width": 1920,
-				"height": 1080,
-				"disposition": {
-					"attached_pic": 0
-				}
-			},
-			{
-				"codec_type": "audio",
-				"codec_name": "aac",
-				"disposition": {
-					"attached_pic": 0
-				}
-			}
-		]
-	}`)
-
-	got := SummarizeProbeStreams(jsonData)
-	wantParts := []string{
-		"#0 type=video codec=mjpeg 600x600 attached_pic=1 pix_fmt=yuvj420p",
-		"#1 type=video codec=h264 1920x1080 attached_pic=0",
-		"#2 type=audio codec=aac 0x0 attached_pic=0",
-	}
-	for _, want := range wantParts {
-		if !strings.Contains(got, want) {
-			t.Fatalf("summary = %q, want part %q", got, want)
-		}
-	}
-}
-
 func TestTranscodeCmd_WithGPU(t *testing.T) {
 	hw := HWProfile{
 		GPUName:  "RTX 4090",
@@ -687,13 +554,19 @@ func TestTranscodeCmd_WithTonemap(t *testing.T) {
 	cmd := TranscodeCmd("/tmp/input.mp4", "/tmp/output.mp4", preset, hw, probe, opts)
 	args := strings.Join(cmd.Args, " ")
 
-	// Should have hwaccel (no subtitles/watermarks forcing software decode)
-	if !strings.Contains(args, "-hwaccel cuda") {
-		t.Error("expected -hwaccel cuda for tonemap-only")
+	// FFmpeg 7.1 does not ship tonemap_cuda. Decode and tone-map in software,
+	// then upload implicitly to the NVENC encoder.
+	if strings.Contains(args, "-hwaccel cuda") {
+		t.Error("should not use CUDA hardware frames for the software tone-map chain")
 	}
-	// Should have GPU tonemap filter
-	if !strings.Contains(args, "tonemap_cuda") {
-		t.Errorf("expected tonemap_cuda filter, got: %s", args)
+	if !strings.Contains(args, "zscale=") || !strings.Contains(args, "tonemap=tonemap=hable") {
+		t.Errorf("expected supported software tone-map filters, got: %s", args)
+	}
+	if strings.Contains(args, "tonemap_cuda") {
+		t.Errorf("must not emit unavailable tonemap_cuda filter, got: %s", args)
+	}
+	if !strings.Contains(args, "-c:v h264_nvenc") {
+		t.Errorf("expected NVENC output after software tone mapping, got: %s", args)
 	}
 }
 

@@ -112,21 +112,8 @@ func buildFilterComplex(opts TranscodeOptions, hw HWProfile, probe ProbeResult,
 	return "filter_complex", strings.Join(filters, ";")
 }
 
-// buildTonemapFilter returns tonemap filter steps.
-// GPU-first approach: use vendor-specific GPU tonemap when no software decode is forced.
-// Falls back to CPU zscale+tonemap when software decode is active or no GPU tonemap available.
+// buildTonemapFilter returns the software HDR-to-SDR filter chain.
 func buildTonemapFilter(hw HWProfile) []string {
-	// When software decode is in effect (subtitles/watermarks force it),
-	// frames are already in CPU memory — use zscale+tonemap CPU path.
-	// Also use CPU path when no GPU is available.
-	// Note: the caller already determined NeedsSoftwareDecode, so if we're here
-	// with a GPU vendor, we check if software decode is forced by looking at
-	// the overall context. Since buildTonemapFilter doesn't know about opts,
-	// we always use CPU tonemap in buildSimpleVF/buildFilterComplex which are
-	// called only when NeedsSoftwareDecode is true (or when there's no GPU).
-	// For GPU tonemap, TranscodeCmd handles it directly when !NeedsSoftwareDecode.
-
-	// CPU tonemap path (used when software decode is active)
 	return []string{
 		"zscale=t=linear:npl=100",
 		"format=gbrpf32le",
@@ -141,12 +128,8 @@ func buildTonemapFilter(hw HWProfile) []string {
 // hardware decode is active (no subtitles/watermarks).
 func buildGPUTonemapFilter(hw HWProfile) string {
 	switch hw.Vendor {
-	case VendorNVIDIA:
-		return "tonemap_cuda=tonemap=hable:desat=0:format=nv12"
 	case VendorAMD:
 		return "tonemap_vaapi=format=nv12"
-	case VendorIntel:
-		return "tonemap_opencl=tonemap=hable:desat=0:format=nv12"
 	default:
 		return ""
 	}

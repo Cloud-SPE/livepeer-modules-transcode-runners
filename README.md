@@ -1,118 +1,56 @@
 # livepeer-modules-transcode-runners
 
-Standalone home for the Livepeer video transcode runners. This repo ships three
-Go HTTP runners plus shared FFmpeg/transcode logic, vendor-specific runtime
-images for NVIDIA, Intel, and AMD, and direct-runner smoke tooling.
+Standalone Go runners for Livepeer Modules v2. The broker authenticates and
+accounts for paid work; these runners own FFmpeg execution and measured usage.
+The companion Go video gateway uses LOC for funding and the Modules broker for
+`paid-job/v1` and `paid-session/v1` dispatch.
 
-> **For agents:** start at [`AGENTS.md`](./AGENTS.md).
+All project work is tracked in Beads. Read [AGENTS.md](AGENTS.md) and
+[WORKFLOW.md](WORKFLOW.md) before changing code.
 
-All project work is tracked in Beads (`bd`). See [`WORKFLOW.md`](./WORKFLOW.md)
-for setup, the daily workflow, and synchronization.
+| Runner | Contract | HTTP entry point | Unit |
+|---|---|---|---|
+| `transcode-runner` | `video-transcode-vod/v2`, terminal SSE | `POST /v1/video/transcode` | `video-frame-megapixel` |
+| `abr-runner` | `video-transcode-abr/v2`, terminal SSE | `POST /v1/video/transcode/abr` | `video-frame-megapixel` |
+| `live-runner` | `paid-session/v1`, `rtmp-hls/v1` descriptor | `POST /v1/sessions` | `output_seconds` |
 
-## What this repo ships
+Each runner advertises its authoritative attach contract at
+`GET /.well-known/livepeer-runner`. The old asynchronous batch polling and
+`/v1/video/live/sessions` endpoints are removed. Deploy with a v2 gateway and
+broker together; this is a breaking upgrade.
 
-| Image | Purpose | Default endpoint |
-|---|---|---|
-| `transcode-runner-nvidia` / `-intel` / `-amd` | Single-rendition VOD transcode | `POST /v1/video/transcode` |
-| `abr-runner-nvidia` / `-intel` / `-amd` | Multi-rendition ABR ladder transcode | `POST /v1/video/transcode/abr` |
-| `live-runner-nvidia` / `-intel` / `-amd` | Live session runner for gateway-ingest RTMP and HLS push output | `POST /v1/video/live/sessions` |
-| `transcode-tester` | Node integration smoke harness | n/a |
+## Build and validate
 
-Shared code lives in [`transcode-core/`](./transcode-core). Build and runtime
-infrastructure lives in [`infra/`](./infra/).
-
-## Build
-
-Every gesture is Docker-first.
-
-```bash
-./build-images.sh build
-./build-images.sh build transcode-runner-nvidia abr-runner-nvidia live-runner-nvidia
+```sh
+./build-images.sh test
 ./build-images.sh validate
-./build-images.sh clean
+TAG=v2-local ./build-images.sh build
 ```
 
-No host Go or host Node required.
+Builds use one root Go module and root Docker contexts. NVIDIA, Intel and AMD
+retain separate FFmpeg base images. NVIDIA defaults to CUDA 12.8.1 for Pascal
+support. The live binary is `live-runner/cmd/live-runner`; its image also
+includes pinned MediaMTX 1.20.1. See [BUILD.md](BUILD.md).
 
-## Compose
+## Run
 
-For vendor-generic local bring-up, use:
+Copy `infra/env/nvidia-prod.env.example` to an ignored local env file and set
+stable live secrets and public origins before starting:
 
-```bash
-docker compose -f infra/compose/docker-compose.runners.yml --profile nvidia up -d
-```
-
-For a production-oriented NVIDIA node, use:
-
-```bash
-cp infra/env/nvidia-prod.env.example .env.nvidia-prod
+```sh
 docker compose --env-file .env.nvidia-prod -f infra/compose/docker-compose.nvidia-prod.yml up -d
 ```
 
-That production stack defaults to the GTX 1080 tuned preset pack in
-[`infra/presets/nvidia-gtx1080-transcode.yaml`](./infra/presets/nvidia-gtx1080-transcode.yaml)
-and
-[`infra/presets/nvidia-gtx1080-abr.yaml`](./infra/presets/nvidia-gtx1080-abr.yaml).
-The live runner uses [`infra/presets/live.yaml`](./infra/presets/live.yaml) by
-default.
+Other GPUs use `infra/compose/docker-compose.runners.yml` with `--profile
+intel`, `amd`, or `nvidia`. Only select one vendor on the same host ports.
+Persist all state volumes. Attach the runners using current Modules templates;
+runner ports and broker control routes belong on the operator network.
 
-## Live runner mode
+Live playback is served through the runner's advertised HLS URL. MediaMTX's
+API and HLS listeners remain private. The gateway obtains a stream key through
+the returned grant and relays RTMP to the advertised ingest URL. The
+`live-standard` output profile meters finalized media on `720p`.
 
-`live-runner` uses a single gateway-ingest shape:
-
-- shared RTMP ingest on one port
-- direct FFmpeg ingest through a local FIFO
-- HLS upload to caller-supplied S3-compatible storage
-
-The broker must include `output_credential` and `ingest_accept.stream_key` in
-the session-open request.
-
-## Repo layout
-
-```text
-.
-├── AGENTS.md, CLAUDE.md
-├── README.md, DESIGN.md, BUILD.md, API.md
-├── OPERATIONS.md, TESTING.md, SECURITY.md
-├── build-images.sh
-├── go.mod, go.sum
-├── abr-runner/                 # ABR ladder runner source + embedded defaults
-├── live-runner/                # remote live session runtime
-├── transcode-runner/           # single-rendition runner source + embedded defaults
-├── transcode-core/             # shared FFmpeg / GPU / preset / HLS logic
-├── transcode-tester/           # Node smoke harness
-├── infra/
-│   ├── compose/                # docker-compose overlays
-│   ├── dockerfiles/            # all Dockerfiles; build context is repo root
-│   ├── env/                    # .env.example templates
-│   ├── offerings/              # runner offering manifests
-│   └── presets/                # operator-editable preset YAMLs
-└── docs/
-    ├── exec-plans/
-    └── references/
-```
-
-## GPU support
-
-All three vendor families are in scope:
-
-- NVIDIA NVENC/NVDEC via CUDA 13 runtime images
-- Intel QSV / VAAPI
-- AMD VAAPI
-
-Strict hardware mode is the default policy across vendors:
-
-- jobs fail closed when the requested path would require CPU-only processing
-- startup filters presets against the actual usable hardware/runtime path
-- visible GPU hardware is not enough; the runner requires a working decode+encode runtime path
-
-Current NVIDIA build note:
-
-- CUDA `13.2.1` is supported
-- FFmpeg is built without `libnpp` on this CUDA line due upstream API incompatibility with FFmpeg `7.1.3`
-
-## What is intentionally absent
-
-- No broker, gateway, or payment-layer code
-- No checked-in secrets, keystores, or operator-local state
-- No copied historical plan/doc tree from the source monorepo
+Read [API.md](API.md), [OPERATIONS.md](OPERATIONS.md), and
+[TESTING.md](TESTING.md). Exact migration provenance and compatibility boundaries
+are recorded in [MODULES-V2.md](MODULES-V2.md).

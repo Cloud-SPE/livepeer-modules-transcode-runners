@@ -1,0 +1,13 @@
+presets:
+  - name: smoke-audio-only
+    description: "Hardware-independent image smoke preset"
+    type: abr
+    format: hls
+    hls_mode: fmp4_single_file
+    segment_duration: 6
+    renditions:
+      - name: audio-only
+        audio:
+          codec: aac
+          bitrate: "32k"
+          channels: 2

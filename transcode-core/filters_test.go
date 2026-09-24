@@ -215,7 +215,7 @@ func TestBuildGPUTonemapFilter(t *testing.T) {
 		{
 			"NVIDIA",
 			HWProfile{Vendor: VendorNVIDIA},
-			"tonemap_cuda",
+			"",
 		},
 		{
 			"AMD",
@@ -225,7 +225,7 @@ func TestBuildGPUTonemapFilter(t *testing.T) {
 		{
 			"Intel",
 			HWProfile{Vendor: VendorIntel},
-			"tonemap_opencl",
+			"",
 		},
 		{
 			"Software",

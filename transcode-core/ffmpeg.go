@@ -35,26 +35,21 @@ type ffprobeOutput struct {
 }
 
 type ffprobeStream struct {
-	CodecType      string             `json:"codec_type"`
-	CodecName      string             `json:"codec_name"`
-	Width          int                `json:"width"`
-	Height         int                `json:"height"`
-	PixFmt         string             `json:"pix_fmt"`
-	RFrameRate     string             `json:"r_frame_rate"`
-	AvgFrameRate   string             `json:"avg_frame_rate"`
-	ColorTransfer  string             `json:"color_transfer"`
-	ColorSpace     string             `json:"color_space"`
-	ColorPrimaries string             `json:"color_primaries"`
-	Disposition    ffprobeDisposition `json:"disposition"`
+	CodecType      string `json:"codec_type"`
+	CodecName      string `json:"codec_name"`
+	Width          int    `json:"width"`
+	Height         int    `json:"height"`
+	PixFmt         string `json:"pix_fmt"`
+	RFrameRate     string `json:"r_frame_rate"`
+	AvgFrameRate   string `json:"avg_frame_rate"`
+	ColorTransfer  string `json:"color_transfer"`
+	ColorSpace     string `json:"color_space"`
+	ColorPrimaries string `json:"color_primaries"`
 }
 
 type ffprobeFormat struct {
 	Duration string `json:"duration"`
 	BitRate  string `json:"bit_rate"`
-}
-
-type ffprobeDisposition struct {
-	AttachedPic int `json:"attached_pic"`
 }
 
 // ProbeCmd returns an exec.Cmd for probing a media file.
@@ -90,88 +85,39 @@ func ParseProbeOutput(jsonData []byte) (ProbeResult, error) {
 	}
 
 	// Parse stream-level fields
-	if video := selectPrimaryVideoStream(out.Streams); video != nil {
-		result.VideoCodec = video.CodecName
-		result.Width = video.Width
-		result.Height = video.Height
-		result.PixFmt = video.PixFmt
-		result.FPS = parseFrameRate(video.RFrameRate, video.AvgFrameRate)
-		result.ColorTransfer = video.ColorTransfer
-		result.ColorPrimaries = video.ColorPrimaries
-		result.ColorSpace = video.ColorSpace
-	}
 	for _, s := range out.Streams {
-		if s.CodecType == "audio" && result.AudioCodec == "" {
-			result.AudioCodec = s.CodecName
+		switch s.CodecType {
+		case "video":
+			if result.VideoCodec == "" {
+				result.VideoCodec = s.CodecName
+				result.Width = s.Width
+				result.Height = s.Height
+				result.PixFmt = s.PixFmt
+				result.FPS = parseFrameRate(s.RFrameRate, s.AvgFrameRate)
+				result.ColorTransfer = s.ColorTransfer
+				result.ColorPrimaries = s.ColorPrimaries
+				result.ColorSpace = s.ColorSpace
+			}
+		case "audio":
+			if result.AudioCodec == "" {
+				result.AudioCodec = s.CodecName
+			}
 		}
 	}
 
 	return result, nil
 }
 
-// SummarizeProbeStreams returns a compact ffprobe stream summary suitable for logs.
-func SummarizeProbeStreams(jsonData []byte) string {
-	var out ffprobeOutput
-	if err := json.Unmarshal(jsonData, &out); err != nil {
-		return "unavailable"
-	}
-	if len(out.Streams) == 0 {
-		return "none"
-	}
-
-	parts := make([]string, 0, len(out.Streams))
-	for i, s := range out.Streams {
-		part := fmt.Sprintf("#%d type=%s codec=%s %dx%d attached_pic=%d",
-			i, valueOrUnknown(s.CodecType), valueOrUnknown(s.CodecName), s.Width, s.Height, s.Disposition.AttachedPic)
-		if s.PixFmt != "" {
-			part += " pix_fmt=" + s.PixFmt
-		}
-		parts = append(parts, part)
-	}
-	return strings.Join(parts, "; ")
-}
-
-func selectPrimaryVideoStream(streams []ffprobeStream) *ffprobeStream {
-	var fallbackWithCodec *ffprobeStream
-	var fallbackAny *ffprobeStream
-
-	for i := range streams {
-		s := &streams[i]
-		if s.CodecType != "video" || s.Disposition.AttachedPic != 0 {
-			continue
-		}
-		if s.CodecName != "" && s.Width > 0 && s.Height > 0 {
-			return s
-		}
-		if fallbackWithCodec == nil && s.CodecName != "" {
-			fallbackWithCodec = s
-		}
-		if fallbackAny == nil {
-			fallbackAny = s
-		}
-	}
-
-	if fallbackWithCodec != nil {
-		return fallbackWithCodec
-	}
-	return fallbackAny
-}
-
-func valueOrUnknown(v string) string {
-	if v == "" {
-		return "unknown"
-	}
-	return v
-}
-
 // TranscodeCmd builds the ffmpeg command for transcoding with the given preset and hardware profile.
 func TranscodeCmd(inputPath, outputPath string, preset Preset, hw HWProfile, probe ProbeResult, opts TranscodeOptions) *exec.Cmd {
 	args := []string{"-y"}
+	softwareDecode := opts.NeedsSoftwareDecode() ||
+		(opts.ToneMap && probe.IsHDR() && buildGPUTonemapFilter(hw) == "")
 
 	// Hardware acceleration input — skip when software decode is needed
 	// (subtitle burn-in and watermark overlay require CPU-side frames)
-	if !opts.NeedsSoftwareDecode() {
-		args = append(args, buildHWAccelInputArgsForCodec(probe.VideoCodec, hw)...)
+	if !softwareDecode {
+		args = append(args, buildHWAccelInputArgs(hw)...)
 	}
 
 	args = append(args, "-i", inputPath)
@@ -182,7 +128,7 @@ func TranscodeCmd(inputPath, outputPath string, preset Preset, hw HWProfile, pro
 	}
 
 	// Video encoding args
-	if opts.NeedsSoftwareDecode() {
+	if softwareDecode {
 		// Use GPU encoder but with software-decoded input
 		args = append(args, buildVideoArgsSWDecode(preset, hw, probe)...)
 	} else {
@@ -190,7 +136,7 @@ func TranscodeCmd(inputPath, outputPath string, preset Preset, hw HWProfile, pro
 	}
 
 	// Filter graph
-	if opts.NeedsSoftwareDecode() {
+	if softwareDecode {
 		// Subtitles/watermarks present — software decode, use advanced filter graph
 		// (includes CPU tonemap if HDR + ToneMap is set)
 		filterType, filterStr := BuildAdvancedFilterGraph(opts, hw, probe, preset.Width, preset.Height)
@@ -298,16 +244,6 @@ func buildHWAccelInputArgs(hw HWProfile) []string {
 		}
 	}
 	return nil
-}
-
-func buildHWAccelInputArgsForCodec(codec string, hw HWProfile) []string {
-	args := buildHWAccelInputArgs(hw)
-	if hw.Vendor == VendorNVIDIA {
-		if decoder := DecoderForCodec(codec, hw); decoder != "" {
-			args = append(args, "-c:v", decoder)
-		}
-	}
-	return args
 }
 
 // buildEncoderTuningArgs returns preset/tune/rc flags per vendor.
@@ -459,15 +395,9 @@ func buildFilterGraph(preset Preset, hw HWProfile, probe ProbeResult) string {
 
 	filters := []string{}
 
-	switch hw.Vendor {
-	case VendorNVIDIA:
-		if hw.HasHWAccel("cuda") && DecoderForCodec(probe.VideoCodec, hw) == "" {
-			filters = append(filters, "format=nv12", "hwupload_cuda")
-		}
-	case VendorAMD:
-		if hw.HasHWAccel("vaapi") {
-			filters = append(filters, "format=nv12", "hwupload")
-		}
+	// AMD VAAPI requires hwupload before scale
+	if hw.Vendor == VendorAMD && hw.HasHWAccel("vaapi") {
+		filters = append(filters, "format=nv12", "hwupload")
 	}
 
 	filters = append(filters, buildScaleFilter(preset.Width, preset.Height, hw))

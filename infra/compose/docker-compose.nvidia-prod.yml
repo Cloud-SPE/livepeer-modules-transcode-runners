@@ -1,24 +1,28 @@
 services:
   transcode_runner:
-    image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v1.3.1}
+    image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v2-local}
     container_name: ${TRANSCODE_CONTAINER_NAME:-transcode-runner}
     restart: unless-stopped
     runtime: nvidia
     environment:
       RUNNER_ADDR: :8080
       MAX_QUEUE_SIZE: ${TRANSCODE_MAX_QUEUE_SIZE:-2}
-      TEMP_DIR: /tmp/transcode
-      JOB_TTL_SECONDS: ${TRANSCODE_JOB_TTL_SECONDS:-3600}
       PRESETS_FILE: /etc/runner/presets/${TRANSCODE_PRESETS_FILE:-nvidia-gtx1080-transcode.yaml}
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,video,utility}
+      STATE_DIR: /var/lib/transcode-runner
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - transcode-temp:/tmp/transcode
+    - ../presets:/etc/runner/presets:ro
+    - transcode_runner-state:/var/lib/transcode-runner
     ports:
-      - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
+    - ${TRANSCODE_RUNNER_PORT:-8086}:8080
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      test:
+      - CMD
+      - curl
+      - --fail
+      - --silent
+      - http://127.0.0.1:8080/healthz
       interval: 30s
       timeout: 5s
       retries: 3
@@ -32,30 +36,34 @@ services:
       resources:
         reservations:
           devices:
-            - driver: nvidia
-              count: ${NVIDIA_DEVICE_COUNT:-1}
-              capabilities: [gpu]
-
+          - driver: nvidia
+            count: ${NVIDIA_DEVICE_COUNT:-1}
+            capabilities:
+            - gpu
   abr_runner:
-    image: ${REGISTRY:-tztcloud}/abr-runner-nvidia:${TAG:-v1.3.1}
+    image: ${REGISTRY:-tztcloud}/abr-runner-nvidia:${TAG:-v2-local}
     container_name: ${ABR_CONTAINER_NAME:-abr-runner}
     restart: unless-stopped
     runtime: nvidia
     environment:
       RUNNER_ADDR: :8080
       MAX_QUEUE_SIZE: ${ABR_MAX_QUEUE_SIZE:-1}
-      TEMP_DIR: /tmp/abr
-      JOB_TTL_SECONDS: ${ABR_JOB_TTL_SECONDS:-3600}
       PRESETS_FILE: /etc/runner/presets/${ABR_PRESETS_FILE:-nvidia-gtx1080-abr.yaml}
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,video,utility}
+      STATE_DIR: /var/lib/abr-runner
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - abr-temp:/tmp/abr
+    - ../presets:/etc/runner/presets:ro
+    - abr_runner-state:/var/lib/abr-runner
     ports:
-      - "${ABR_RUNNER_PORT:-8087}:8080"
+    - ${ABR_RUNNER_PORT:-8087}:8080
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      test:
+      - CMD
+      - curl
+      - --fail
+      - --silent
+      - http://127.0.0.1:8080/healthz
       interval: 30s
       timeout: 5s
       retries: 3
@@ -69,31 +77,39 @@ services:
       resources:
         reservations:
           devices:
-            - driver: nvidia
-              count: ${NVIDIA_DEVICE_COUNT:-1}
-              capabilities: [gpu]
-
+          - driver: nvidia
+            count: ${NVIDIA_DEVICE_COUNT:-1}
+            capabilities:
+            - gpu
   live_runner:
-    image: ${REGISTRY:-tztcloud}/live-runner-nvidia:${TAG:-v1.3.1}
+    image: ${REGISTRY:-tztcloud}/live-runner-nvidia:${TAG:-v2-local}
     container_name: ${LIVE_CONTAINER_NAME:-live-runner}
     restart: unless-stopped
     runtime: nvidia
     environment:
-      RUNNER_ADDR: :8080
-      TEMP_DIR: /tmp/live
-      PRESETS_FILE: /etc/runner/presets/${LIVE_PRESETS_FILE:-live.yaml}
-      RUNNER_INGEST_PUBLIC_HOST: ${LIVE_INGEST_PUBLIC_HOST:-localhost}
-      RUNNER_SHARED_INGEST_ADDR: :1935
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,video,utility}
+      LIVE_RUNNER_ADDR: :8080
+      LIVE_RUNNER_STATE_DIR: /var/lib/live-runner
+      LIVE_RUNNER_PRESETS_FILE: /etc/runner/presets/live.yaml
+      LIVE_RUNNER_MASTER_KEY: ${LIVE_RUNNER_MASTER_KEY:-}
+      LIVE_RUNNER_BROKER_TOKEN: ${LIVE_RUNNER_BROKER_TOKEN:-}
+      LIVE_RUNNER_INTERNAL_MEDIA_TOKEN: ${LIVE_RUNNER_INTERNAL_MEDIA_TOKEN:-}
+      LIVEPEER_PUBLIC_RTMP_URL: ${LIVEPEER_PUBLIC_RTMP_URL:-rtmp://localhost:1935}
+      LIVEPEER_PUBLIC_URL: ${LIVEPEER_PUBLIC_URL:-http://localhost:8088}
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - live-temp:/tmp/live
+    - ../presets:/etc/runner/presets:ro
+    - live_runner-state:/var/lib/live-runner
     ports:
-      - "${LIVE_RUNNER_PORT:-8088}:8080"
-      - "${LIVE_SHARED_INGEST_PORT:-1935}:1935"
+    - ${LIVE_RUNNER_PORT:-8088}:8080
+    - ${LIVE_SHARED_INGEST_PORT:-1935}:1935
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      test:
+      - CMD
+      - curl
+      - --fail
+      - --silent
+      - http://127.0.0.1:8080/ready
       interval: 30s
       timeout: 5s
       retries: 3
@@ -107,11 +123,11 @@ services:
       resources:
         reservations:
           devices:
-            - driver: nvidia
-              count: ${NVIDIA_DEVICE_COUNT:-1}
-              capabilities: [gpu]
-
+          - driver: nvidia
+            count: ${NVIDIA_DEVICE_COUNT:-1}
+            capabilities:
+            - gpu
 volumes:
-  transcode-temp: {}
-  abr-temp: {}
-  live-temp: {}
+  transcode_runner-state: {}
+  abr_runner-state: {}
+  live_runner-state: {}

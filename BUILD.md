@@ -1,81 +1,33 @@
-# BUILD
+# Build
 
-All Dockerfiles build from repo root and live under [`infra/dockerfiles/`](./infra/dockerfiles/).
+All commands run from the repository root. No host Go or Node installation is
+needed. Docker must be running.
 
-## Images
-
-Internal-only build artifacts:
-
-- `codecs-builder`
-- `ffmpeg-base-nvidia`
-- `ffmpeg-base-intel`
-- `ffmpeg-base-amd`
-
-Runner images:
-
-- `transcode-runner-nvidia`
-- `transcode-runner-intel`
-- `transcode-runner-amd`
-- `abr-runner-nvidia`
-- `abr-runner-intel`
-- `abr-runner-amd`
-- `live-runner-nvidia`
-- `live-runner-intel`
-- `live-runner-amd`
-- `transcode-tester`
-
-## Script
-
-Use [`build-images.sh`](./build-images.sh):
-
-```bash
-./build-images.sh build
-./build-images.sh build ffmpeg-base-nvidia transcode-runner-nvidia
-./build-images.sh push
+```sh
+./build-images.sh test
 ./build-images.sh validate
-./build-images.sh clean
+TAG=v2-local ./build-images.sh build
 ```
 
-Key environment overrides:
+The full build orders codecs, each vendor FFmpeg base, all nine runners, and
+the tester. For an existing base, build selected runners with:
 
-- `REGISTRY` default `tztcloud`
-- `INTERNAL_REGISTRY` default `localbuild`
-- `TAG` default `v1.3.1`
-- `CUDA_VERSION` default `13.2.1`
-- `UBUNTU_VERSION` default `24.04`
-- `GO_VERSION` default `1.25.7`
-- `NODE_VERSION` default `22`
+```sh
+TAG=v2-local ./build-images.sh build abr-runner-nvidia live-runner-nvidia
+```
 
-Runner images also embed startup build metadata:
+`REGISTRY` defaults to `tztcloud`; `INTERNAL_REGISTRY` to `localbuild`.
+`TAG` defaults to `v2-local`, a local migration tag, not a published release.
+Set a reviewed release tag explicitly for production. `GO_VERSION` defaults
+to 1.25.7, `CUDA_VERSION` to 12.8.1, `UBUNTU_VERSION` to 24.04 and
+`NODE_VERSION` to 22. All Dockerfiles are under `infra/dockerfiles/` with root
+build context. Live images include MediaMTX pinned by digest.
 
-- `version`
-- `commit`
-- `build time`
+`go-runner.Dockerfile` builds VOD and ABR package roots and
+`live-runner/cmd/live-runner`. It creates writable persistent-state boundaries,
+installs non-root runtime users, and sets live hardware policy per image.
+NVIDIA remains CUDA 12.x because Pascal/sm_61 support is required. Intel and
+AMD use their dedicated userspace drivers and `/dev/dri` access.
 
-Those fields are stamped through linker flags during `./build-images.sh build` and
-show up in runner startup logs.
-
-## CUDA 13 note
-
-The NVIDIA build targets CUDA `13.2.1`.
-
-- CUDA / NVENC / NVDEC / CUVID are enabled
-- `libnpp` is intentionally disabled in the current FFmpeg pin because CUDA 13 removed legacy NPP entrypoints that FFmpeg `7.1.3` still references
-- FFmpeg base images now disable docs and static artifacts at build time, and runtime stages strip unneeded `.a` files and `pkgconfig` metadata
-
-## Lean runtime policy
-
-Runtime images should include only:
-
-- runner binary
-- `ffmpeg`
-- `ffprobe`
-- required shared libraries
-- CA certificates
-- non-root user setup
-
-Toolchains, build utilities, and package managers stay in builder stages.
-
-`build-images.sh push` only publishes deployable runner images. Base images and
-`codecs-builder` stay under the internal local build namespace and are not
-tagged into `tztcloud/*`.
+Publishing is an explicit operator action: `TAG=<release> ./build-images.sh
+push`. This migration does not publish or deploy images.

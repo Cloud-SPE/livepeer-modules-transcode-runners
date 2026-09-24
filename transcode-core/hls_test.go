@@ -10,7 +10,6 @@ func TestHLSRenditionCmd_WithGPU(t *testing.T) {
 		GPUName:  "RTX 4090",
 		Vendor:   VendorNVIDIA,
 		Encoders: []string{"h264_nvenc", "hevc_nvenc"},
-		Decoders: []string{"h264_cuvid"},
 		HWAccels: []string{"cuda"},
 	}
 	rendition := ABRRendition{
@@ -30,7 +29,7 @@ func TestHLSRenditionCmd_WithGPU(t *testing.T) {
 			Channels: 2,
 		},
 	}
-	probe := ProbeResult{Width: 3840, Height: 2160, VideoCodec: "h264"}
+	probe := ProbeResult{Width: 3840, Height: 2160}
 
 	cmd := HLSRenditionCmd("/tmp/input.mp4", "/tmp/out/1080p", rendition, 6, hw, probe)
 	args := strings.Join(cmd.Args, " ")
@@ -54,9 +53,16 @@ func TestHLSRenditionCmd_WithGPU(t *testing.T) {
 		t.Error("expected -maxrate 7.5M")
 	}
 
-	// Scale (4K input → 1080p output)
-	if !strings.Contains(args, "scale_cuda=1920:1080") {
-		t.Error("expected scale_cuda=1920:1080")
+	// Scale (4K input → 1080p output). The upload ahead of scale_cuda must
+	// be the generic hwupload: it passes a hardware-decoded CUDA frame
+	// through and uploads a software one. hwupload_cuda rejects CUDA frames
+	// with "Invalid argument", which failed every scaled ABR rendition on a
+	// hardware-decoding GTX 1080 while the unscaled VOD rendition passed.
+	if !strings.Contains(args, "hwupload,scale_cuda=1920:1080") {
+		t.Errorf("expected hwupload,scale_cuda=1920:1080, got: %s", args)
+	}
+	if strings.Contains(args, "hwupload_cuda") {
+		t.Errorf("hwupload_cuda fails on hardware-decoded frames, got: %s", args)
 	}
 
 	// Profile and level
@@ -179,7 +185,6 @@ func TestHLSRenditionCmd_WithIntelQSV(t *testing.T) {
 		Vendor:     VendorIntel,
 		DevicePath: "/dev/dri/renderD128",
 		Encoders:   []string{"h264_qsv", "hevc_qsv"},
-		Decoders:   []string{"h264_qsv"},
 		HWAccels:   []string{"qsv", "vaapi"},
 	}
 	rendition := ABRRendition{
@@ -195,7 +200,7 @@ func TestHLSRenditionCmd_WithIntelQSV(t *testing.T) {
 		},
 		Audio: ABRAudioSettings{Codec: "aac", Bitrate: "128k", Channels: 2},
 	}
-	probe := ProbeResult{Width: 3840, Height: 2160, VideoCodec: "h264"}
+	probe := ProbeResult{Width: 3840, Height: 2160}
 
 	cmd := HLSRenditionCmd("/tmp/input.mp4", "/tmp/out/1080p", rendition, 6, hw, probe)
 	args := strings.Join(cmd.Args, " ")
@@ -238,7 +243,6 @@ func TestHLSRenditionCmd_WithAMDVAAPI(t *testing.T) {
 		Vendor:     VendorAMD,
 		DevicePath: "/dev/dri/renderD128",
 		Encoders:   []string{"h264_vaapi", "hevc_vaapi"},
-		Decoders:   []string{"h264_vaapi"},
 		HWAccels:   []string{"vaapi"},
 	}
 	rendition := ABRRendition{
@@ -254,15 +258,17 @@ func TestHLSRenditionCmd_WithAMDVAAPI(t *testing.T) {
 		},
 		Audio: ABRAudioSettings{Codec: "aac", Bitrate: "128k", Channels: 2},
 	}
-	probe := ProbeResult{Width: 3840, Height: 2160, VideoCodec: "h264"}
+	probe := ProbeResult{Width: 3840, Height: 2160}
 
 	cmd := HLSRenditionCmd("/tmp/input.mp4", "/tmp/out/1080p", rendition, 6, hw, probe)
 	args := strings.Join(cmd.Args, " ")
 
-	// Current HLS path keeps AMD on software decode and uses VAAPI only for
-	// upload/scale/encode.
-	if strings.Contains(args, "-hwaccel") {
-		t.Errorf("did not expect explicit hwaccel flags for AMD HLS path, got: %s", args)
+	// VAAPI hwaccel
+	if !strings.Contains(args, "-hwaccel vaapi") {
+		t.Errorf("expected -hwaccel vaapi, got: %s", args)
+	}
+	if !strings.Contains(args, "-hwaccel_device /dev/dri/renderD128") {
+		t.Errorf("expected -hwaccel_device, got: %s", args)
 	}
 	// VAAPI encoder
 	if !strings.Contains(args, "-c:v h264_vaapi") {

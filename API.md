@@ -1,63 +1,49 @@
-# API
+# Runner API
 
-## transcode-runner
+`GET /.well-known/livepeer-runner` is the authoritative Modules attachment
+contract for every runner. Attach using current Modules templates, not the
+removed legacy profile fallback.
 
-- `POST /v1/video/transcode`
-  - submits a single-rendition job
-  - returns `202` with `job_id`
-- `POST /v1/video/transcode/status`
-  - accepts `{ "job_id": "..." }`
-  - returns current job status
-- `GET /v1/video/transcode/presets`
-  - lists active presets after hardware filtering
-- `GET /healthz`
+## Batch jobs
 
-## abr-runner
+VOD accepts `POST /v1/video/transcode` with `video-transcode-vod/v2`.
+ABR accepts `POST /v1/video/transcode/abr` with `video-transcode-abr/v2`.
+Send `Content-Type: application/json` and `Accept: text/event-stream`.
+Requests contain a stable `workload_id`, nested input URL, output artifact
+references and upload URLs; ABR also selects a ladder preset. ABR destination
+keys must match the selected preset exactly. See versioned fixtures under
+`abr-runner/testdata/contracts/v2/` and VOD types in
+`transcode-runner/vod_v2.go`.
 
-- `POST /v1/video/transcode/abr`
-  - submits an ABR job
-  - returns `202` with `job_id` and selected renditions
-- `POST /v1/video/transcode/abr/status`
-  - accepts `{ "job_id": "..." }`
-  - returns current job and per-rendition status
-- `GET /v1/video/transcode/abr/presets`
-  - lists active ABR presets after hardware filtering
-- `GET /healthz`
+One HTTP response streams progress and exactly one terminal `result` or `error`.
+There is no 202/status-poll API. `X-Livepeer-Work-Units` is a runner-to-broker
+HTTP trailer; the broker exposes the normative `Livepeer-Work-Units` claim.
+Usage is `ceil(sum(actual_frames * width * height) / 1_000_000)` for delivered
+video, including partial delivery on failure. Input duration is not settlement
+evidence. Duplicate identical requests replay durable state; a changed request
+with the same workload ID returns 409.
 
-## live-runner
+`GET /healthz` and each invocation route's `/presets` suffix remain available.
 
-- `POST /v1/video/live/sessions`
-  - creates a gateway-ingest live runner session
-  - response includes `runner_session_id` and `private_ingest_url`
-- `GET /v1/video/live/sessions/{runner_session_id}`
-  - returns current runner session state, ingest/output health, and cumulative
-    usage
-- `DELETE /v1/video/live/sessions/{runner_session_id}`
-  - terminates a live session
-- `GET /healthz`
+## Live sessions
 
-### Gateway-ingest mode request fields
+| Method | Path | Authentication |
+|---|---|---|
+| POST | `/v1/sessions` | Member-agent tunnel, or configured broker bearer |
+| GET, DELETE | `/v1/sessions/{id}` | Member-agent tunnel, or configured broker bearer |
+| POST | `/v1/sessions/{id}/stream-keys` | Returned `stream-key-issue` grant bearer |
+| GET | `/v1/public/sessions/{id}/status` | Public safe status |
+| GET | `/ready` | Readiness |
 
-`POST /v1/video/live/sessions` may include:
+The broker owns the session ID and includes `rtmp-hls-session/v1` parameters:
+`publisher_mode`, `output_profile`, `metering_rendition`, and storage. The runner
+returns `rtmp-hls/v1` public runtime coordinates and private grants. The gateway
+uses the grant to obtain a stream key with an idempotent `request_id`. Keys
+are not supplied in the create request. Fixtures are under
+`live-runner/testdata/contracts/v1/`.
 
-- `output_credential`
-  - S3-compatible endpoint, bucket, prefix, and temporary credentials used for
-    HLS upload
-- `ingest_accept.stream_key`
-  - stream key the shared RTMP ingress must accept
-
-The runner requires these fields and:
-
-- returns `private_ingest_url`
-- uploads HLS playlists and segments to the provided object store
-- does not serve playback from local HTTP
-
-## Notes
-
-- Status polling is `POST`, not `GET`
-- Request bodies are JSON
-- Upload and download URLs are caller-provided
-- `live-runner` is a broker-facing service, not a customer-facing API
-- Webhook callbacks remain supported by the source runner code
-- `webhook_url` is caller-supplied per job request; the runner does not derive it from env
-- in containerized deployments, `localhost` in `webhook_url` points at the runner container itself
+Usage is cumulative whole finalized `output_seconds` on the named metering
+rendition, not wall time or a sum across the ladder. Callback events have
+persistent IDs and sequences, use the per-session callback bearer, and retry
+from a durable outbox. Closing a session stops ingest and playback and erases
+its credentials once callback delivery is resolved.

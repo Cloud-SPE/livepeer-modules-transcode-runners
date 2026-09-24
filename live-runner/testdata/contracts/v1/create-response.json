@@ -1,0 +1,20 @@
+{
+  "runner_session_id": "runner_session_001",
+  "runtime": {
+    "schema": "rtmp-hls/v1",
+    "public": {
+      "rtmp_url": "rtmps://runner.example/ingest",
+      "hls_url": "https://runner.example/hls/runner_session_001/master.m3u8",
+      "key_issue_url": "https://runner.example/v1/sessions/runner_session_001/stream-keys",
+      "status_url": "https://runner.example/v1/public/sessions/runner_session_001/status"
+    },
+    "grants": [
+      {
+        "id": "grant_stream_key_001",
+        "operations": ["stream-key-issue"],
+        "secret": "grant-secret-fixture",
+        "expires_at": "2030-01-01T00:00:00Z"
+      }
+    ]
+  }
+}

@@ -1,12 +1,18 @@
-# SECURITY
+# Security
 
-- No secrets, keystores, or operator-local state belong in this repo
-- Runtime images should run as non-root users
-- Only the minimal runtime packages should ship in final images
-- Upload and download URLs are caller-controlled inputs and should be treated as untrusted
-- This repo does not own customer auth, payment validation, or billing logic
-- `live-runner` control APIs should be protected with broker-scoped auth when exposed on a shared network
-- `live-runner` stream keys are bearer secrets and should only be returned once on session creation
+Runners do not authenticate customers or validate payment. The Modules broker
+owns that boundary. Keep runner invocation/control routes on the operator
+network. Modules member-agent tunnel attachment provides the trust boundary
+without a runner bearer. For standalone direct clients, configure the live
+broker bearer on both sides.
 
-If security-sensitive operator configuration is needed, provide `.env.example`
-templates under `infra/env/` and keep real values out of git.
+Signed input/output URLs, callback tokens, storage credentials, grant secrets
+and stream keys are credentials. Never log request bodies or commit real env
+files. Public status and runtime descriptors contain only safe coordinates;
+key issuance requires the scoped grant bearer. An identical key request may
+return the same key for recovery; a new request rotates and invalidates it.
+
+Live state encrypts per-session credentials under a stable operator master
+key. Protect and back up state with its key. MediaMTX APIs and internal media
+listeners remain loopback-only. Runtime images run non-root. Treat all media
+URLs as untrusted and enforce network policy around runner egress.

@@ -1,0 +1,12 @@
+presets:
+  - name: smoke-h264
+    description: "CPU-only image smoke preset"
+    video_codec: h264
+    audio_codec: aac
+    width: 64
+    height: 64
+    bitrate: "100k"
+    pix_fmt: yuv420p
+    gpu_required: false
+    audio_bitrate: "32k"
+    audio_channels: 2

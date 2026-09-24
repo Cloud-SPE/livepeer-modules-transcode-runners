@@ -1,3 +1,5 @@
+> Historical v0 reference. Superseded by [API.md](API.md) and [MODULES-V2.md](MODULES-V2.md); do not use these interfaces for v2 deployments.
+
 # LIVE OPTION B COORDINATION
 
 One-page coordination doc for the remote live runner topology:

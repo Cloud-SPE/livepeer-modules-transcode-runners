@@ -1,93 +1,41 @@
-# OPERATIONS
+# Operations
 
-Runtime configuration templates live in [`infra/env/`](./infra/env/).
+Deploy a v2-compatible gateway, LOC and Modules broker alongside these runners.
+Runner self-description replaces legacy static runner profiles. Use current
+Modules `video-transcode-vod`, `video-transcode-abr` and `video-transcode-live`
+templates; offerings commonly use `vod-default`, `abr-default` and
+`gateway-ingest`. Offering names remain discovery/operator policy.
 
-Compose overlays live in [`infra/compose/`](./infra/compose/).
+Batch requires `STATE_DIR` on persistent storage. Do not delete journals while
+work may be retried: that can repeat encoding and uploads. Signed URLs must
+remain valid for execution and the recovery window; changing them changes the
+canonical workload hash. The old `TEMP_DIR` and `JOB_TTL_SECONDS` environment
+variables do not configure v2 recovery.
 
-## GPU modes
+Live requires stable `LIVE_RUNNER_MASTER_KEY` (base64 32 bytes),
+`LIVE_RUNNER_INTERNAL_MEDIA_TOKEN` (at least 32 characters),
+`LIVE_RUNNER_PRESETS_FILE`, `LIVEPEER_PUBLIC_URL`, and
+`LIVEPEER_PUBLIC_RTMP_URL`. Leave `LIVE_RUNNER_BROKER_TOKEN` empty for Modules member-agent tunnel
+attachment: the tunnel authenticates the broker and does not forward a runner
+bearer. For standalone control clients outside that tunnel, set an independent
+strong token and require those clients to send it. Protect the state volume and master
+key together; changing the key makes existing encrypted sessions unreadable.
+Generate secrets with `openssl rand -base64 32` and store them outside git.
 
-- NVIDIA: use the `nvidia` profile and a host with NVIDIA Container Toolkit
-- Intel: use the `intel` profile and pass `/dev/dri`
-- AMD: use the default `amd` profile and pass `/dev/dri`
+The public HTTP origin must route descriptor-advertised HLS, status and key
+issuance paths to this runner. The RTMP origin must route to its MediaMTX
+listener (or an RTMPS edge). Do not expose private MediaMTX API, HLS or metrics
+listeners. Live readiness is `/ready`; batch readiness is `/healthz`.
 
-For a long-running NVIDIA node, prefer [`docker-compose.nvidia-prod.yml`](./infra/compose/docker-compose.nvidia-prod.yml) plus [`nvidia-prod.env.example`](./infra/env/nvidia-prod.env.example).
+The default live profile is `live-standard`, metered on `720p`. Output stalls
+at 20 seconds and fails after 60 seconds by default. Configuration, durable
+callback retries and hardware admission are validated at startup. `STATE_DIR`
+and `LIVE_RUNNER_STATE_DIR` volumes in compose persist across container restarts.
 
-NVIDIA health on the host matters before the runner does:
+For a GPU shared by live and batch, mount one writable host directory into all
+three containers and set identical `GPU_ADMISSION_LOCK=/shared/encoder` paths.
+Set local concurrency conservatively; actual GPU certification must encode
+media and verify advancing HLS, not just list available encoders.
 
-- `nvidia-smi` should work on the host
-- Docker GPU injection should work for a trivial CUDA container before testing runner jobs
-- if host driver and user-space libraries are mismatched, the NVIDIA runner image will still start, but strict GPU mode will mark the runtime unusable and disable all GPU-bound presets
-- startup now logs the exact GPU detection failure reason, including runtime sanity-check failures
-
-On a GTX 1080 specifically:
-
-- H.264 NVENC should be available
-- HEVC NVENC should be available
-- AV1 encode is not available
-- the production NVIDIA stack defaults to:
-  - [`nvidia-gtx1080-transcode.yaml`](./infra/presets/nvidia-gtx1080-transcode.yaml)
-  - [`nvidia-gtx1080-abr.yaml`](./infra/presets/nvidia-gtx1080-abr.yaml)
-- 4K and AV1 are intentionally excluded from that pack
-- `TRANSCODE_PRESETS_FILE` and `ABR_PRESETS_FILE` can be overridden in the env file if you want a different preset pack
-
-## Presets
-
-Operator-editable presets live in [`infra/presets/`](./infra/presets/).
-
-Set:
-
-- `PRESETS_FILE=/etc/runner/presets/transcode.yaml` for `transcode-runner`
-- `PRESETS_FILE=/etc/runner/presets/abr.yaml` for `abr-runner`
-- `PRESETS_FILE=/etc/runner/presets/live.yaml` for `live-runner`
-
-If unset, each runner falls back to its embedded preset file.
-
-## Strict GPU mode
-
-- `GPU_STRICT` defaults to `true` on all vendors
-- strict mode rejects request features that currently require CPU-side processing:
-  - subtitle burn-in
-  - watermark overlay
-  - thumbnail extraction
-- strict mode also rejects jobs when hardware decode for the input codec or hardware encode for the output codec is unavailable
-
-If you need best-effort development behavior, you can explicitly set `GPU_STRICT=false`, but that is not the production default.
-
-## State and storage
-
-- Jobs are stored in memory only
-- `live-runner` sessions are stored in memory only
-- Scratch space lives under `/tmp/transcode`, `/tmp/abr`, or `/tmp/live`
-- VOD runners upload to caller-provided output URLs
-- `live-runner` uploads HLS artifacts to caller-supplied S3-compatible storage
-
-## Live runner
-
-`live-runner` is a broker-facing remote session backend.
-
-Key runtime knobs:
-
-- `RUNNER_INGEST_PUBLIC_HOST` — host returned in gateway-ingest `private_ingest_url`
-- `RUNNER_SHARED_INGEST_ADDR` — shared RTMP ingest bind address for gateway-ingest mode, default `:1935`
-- `SESSION_NO_PUBLISH_TTL` — max wait for first RTMP publish
-- `SESSION_IDLE_TTL` — max stall window after publishing starts
-- `OUTPUT_SYNC_INTERVAL` — cadence for gateway-ingest S3 sync polling
-- `OUTPUT_FAILURE_THRESHOLD` — consecutive uploader failures before the runner marks output delivery as degraded in logs and session output status
-- `OUTPUT_SYNC_UNSIGNED_PAYLOAD` — when `true`, S3 upload requests use `UNSIGNED-PAYLOAD` instead of a signed body hash
-- `BROKER_AUTH_TOKEN` — optional bearer token required on the control API
-
-Ingress topology is fixed:
-
-- one shared RTMP ingest port, typically `1935`
-- broker-facing HTTP control API on `RUNNER_ADDR`
-- HLS output uploaded to the caller-supplied S3-compatible target
-
-Operators should expose:
-
-- the HTTP control port
-- the shared RTMP ingest port
-
-Startup logging now prints:
-
-- runner build version, commit, and build time
-- effective non-secret runtime config, including whether `OUTPUT_SYNC_UNSIGNED_PAYLOAD` is enabled
+The two old `LIVE-OPTION-B-*` documents describe the retired v0 API and are
+historical only. Current source types, fixtures, and [API.md](API.md) govern v2.

@@ -1,72 +1,25 @@
-# DESIGN
+# Architecture
 
-This repo ships three HTTP runners that orchestrate FFmpeg subprocesses for VOD
-and live video workloads:
+Three runners share `transcode-core`, a Go library for GPU detection, FFmpeg
+commands, presets, HLS, media probing and GPU admission. They do not implement
+LOC funding, customer identity, or payment validation.
 
-- `transcode-runner` handles single-rendition transcode jobs
-- `abr-runner` handles multi-rendition ABR ladder jobs
-- `live-runner` handles live RTMP ingest and session-oriented HLS output work
+Batch runners accept one versioned request with a stable `workload_id`, validate
+its canonical digest, persist admission, and stream progress through a terminal
+SSE event. Identical retries attach to the same durable execution/result;
+changed content under the same ID fails. The broker extracts measured delivered
+frame-megapixels from the terminal response trailer. Journal files survive
+container replacement through dedicated state volumes.
 
-Both binaries import the shared `transcode-core` package, which owns:
+The live runner receives broker session parameters and callback credentials,
+creates an encrypted durable session, and returns a runtime descriptor plus a
+scoped key-issue grant. MediaMTX authenticates publishers using runner-issued
+keys. FFmpeg publishes a live ladder to private MediaMTX paths; the runner
+proxies playable HLS and counts finalized segments on the metering rendition.
+Durable sequenced callbacks communicate cumulative `output_seconds` to the
+broker. Restart recovers state, key rotation, termination and pending callbacks.
 
-- GPU detection and encoder selection
-- FFmpeg and ffprobe command construction
-- Preset parsing and validation
-- HLS playlist generation
-- Progress parsing
-- Download/upload helpers
-- Filter graph construction for subtitles, watermarking, thumbnails, and tone mapping
-
-## Mental model
-
-The broker or any compatible upstream submits a job over HTTP. The runner:
-
-1. validates the request
-2. downloads the input
-3. probes media with `ffprobe`
-4. runs FFmpeg with the best available hardware path
-5. uploads outputs to caller-provided URLs
-6. exposes job status over a polling endpoint
-
-For `live-runner`, the shape is session-oriented instead:
-
-1. broker creates a runner session over HTTP
-2. runner accepts gateway-owned RTMP on one shared ingest port
-3. runner starts an FFmpeg live HLS runtime
-4. publisher or gateway pushes RTMP into the runner ingest plane
-5. runner emits heartbeat, publish, upload, and usage events back to the broker
-6. broker closes the runner session over HTTP when the live session ends
-
-Ingest lifecycle and output lifecycle are intentionally separate:
-
-- publisher disconnects and idle timeouts drive live session state
-- S3 upload failures degrade output health and emit upload failure events, but do
-  not transition the ingest session out of `publishing` on their own
-
-Job state is in-memory only. Restarts lose active and historical job state.
-
-## Image strategy
-
-The repo uses shared vendor-specific FFmpeg runtime bases:
-
-- `ffmpeg-base-nvidia` on CUDA 13
-- `ffmpeg-base-intel` on Ubuntu 24.04 + Intel media stack
-- `ffmpeg-base-amd` on Ubuntu 24.04 + VAAPI stack
-
-Each runner image then adds only:
-
-- the statically linked Go binary
-- the embedded preset file path override
-- the temp dir
-- a non-root runtime user
-
-`live-runner` keeps session state in memory and per-session scratch on local
-disk. It uploads HLS artifacts to caller-supplied S3-compatible storage and
-does not serve playback itself. It remains blind to customer identity and
-billing state; the broker is still the payment and session authority.
-
-## Clean-slate constraints
-
-- No source-monorepo historical docs copied forward
-- No secrets or operator-local state
-- No broker-specific assumptions in the direct-runner smoke path
+All images run non-root. NVIDIA, Intel and AMD runtime bases remain separate;
+live hardware admission fails closed for the image's declared vendor. On a
+shared physical GPU, configure the same `GPU_ADMISSION_LOCK` mount in all
+containers to exclude live and batch cohorts from each other.

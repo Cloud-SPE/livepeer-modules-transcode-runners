@@ -1,0 +1,27 @@
+{
+  "session_id": "sess_broker_001",
+  "work_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "capability": "video:transcode.live",
+  "offering": "live-standard",
+  "session_params": {
+    "schema": "rtmp-hls-session/v1",
+    "publisher_mode": "gateway-relay",
+    "output_profile": "live-standard",
+    "metering_rendition": "720p",
+    "storage": {
+      "kind": "s3",
+      "s3": {
+        "endpoint": "https://minio.internal.example",
+        "region": "us-east-1",
+        "bucket": "live-output",
+        "prefix": "sessions/gateway-session-001",
+        "access_key_id": "STSACCESSFIXTURE",
+        "secret_access_key": "sts-secret-fixture",
+        "session_token": "sts-session-token-fixture",
+        "force_path_style": true
+      }
+    }
+  },
+  "callback_url": "https://broker.internal.example/v1/session/sess_broker_001/events",
+  "callback_token": "callback-secret-fixture"
+}

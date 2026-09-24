@@ -1,158 +1,161 @@
 services:
   transcode_runner_amd:
-    image: ${REGISTRY:-tztcloud}/transcode-runner-amd:${TAG:-v1.3.1}
-    profiles: ["amd"]
+    image: ${REGISTRY:-tztcloud}/transcode-runner-amd:${TAG:-v2-local}
+    profiles:
+    - amd
     devices:
-      - /dev/dri:/dev/dri
+    - /dev/dri:/dev/dri
     environment:
-      - RUNNER_ADDR=:8080
-      - MAX_QUEUE_SIZE=5
-      - TEMP_DIR=/tmp/transcode
-      - JOB_TTL_SECONDS=3600
-      - PRESETS_FILE=/etc/runner/presets/transcode.yaml
+      RUNNER_ADDR: :8080
+      MAX_QUEUE_SIZE: '5'
+      PRESETS_FILE: /etc/runner/presets/transcode.yaml
+      STATE_DIR: /var/lib/transcode-runner
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - transcode-temp:/tmp/transcode
+    - ../presets:/etc/runner/presets:ro
+    - transcode_runner-state:/var/lib/transcode-runner
     ports:
-      - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
-
+    - ${TRANSCODE_RUNNER_PORT:-8086}:8080
   abr_runner_amd:
-    image: ${REGISTRY:-tztcloud}/abr-runner-amd:${TAG:-v1.3.1}
-    profiles: ["amd"]
+    image: ${REGISTRY:-tztcloud}/abr-runner-amd:${TAG:-v2-local}
+    profiles:
+    - amd
     devices:
-      - /dev/dri:/dev/dri
+    - /dev/dri:/dev/dri
     environment:
-      - RUNNER_ADDR=:8080
-      - MAX_QUEUE_SIZE=2
-      - TEMP_DIR=/tmp/abr
-      - JOB_TTL_SECONDS=3600
-      - PRESETS_FILE=/etc/runner/presets/abr.yaml
+      RUNNER_ADDR: :8080
+      MAX_QUEUE_SIZE: '2'
+      PRESETS_FILE: /etc/runner/presets/abr.yaml
+      STATE_DIR: /var/lib/abr-runner
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - abr-temp:/tmp/abr
+    - ../presets:/etc/runner/presets:ro
+    - abr_runner-state:/var/lib/abr-runner
     ports:
-      - "${ABR_RUNNER_PORT:-8087}:8080"
-
+    - ${ABR_RUNNER_PORT:-8087}:8080
   live_runner_amd:
-    image: ${REGISTRY:-tztcloud}/live-runner-amd:${TAG:-v1.3.1}
-    profiles: ["amd"]
+    image: ${REGISTRY:-tztcloud}/live-runner-amd:${TAG:-v2-local}
+    profiles:
+    - amd
     devices:
-      - /dev/dri:/dev/dri
+    - /dev/dri:/dev/dri
     environment:
-      - RUNNER_ADDR=:8080
-      - TEMP_DIR=/tmp/live
-      - PRESETS_FILE=/etc/runner/presets/live.yaml
-      - RUNNER_INGEST_PUBLIC_HOST=localhost
-      - RUNNER_SHARED_INGEST_ADDR=:1935
+      LIVE_RUNNER_ADDR: :8080
+      LIVE_RUNNER_STATE_DIR: /var/lib/live-runner
+      LIVE_RUNNER_PRESETS_FILE: /etc/runner/presets/live.yaml
+      LIVE_RUNNER_MASTER_KEY: ${LIVE_RUNNER_MASTER_KEY:-}
+      LIVE_RUNNER_BROKER_TOKEN: ${LIVE_RUNNER_BROKER_TOKEN:-}
+      LIVE_RUNNER_INTERNAL_MEDIA_TOKEN: ${LIVE_RUNNER_INTERNAL_MEDIA_TOKEN:-}
+      LIVEPEER_PUBLIC_RTMP_URL: ${LIVEPEER_PUBLIC_RTMP_URL:-rtmp://localhost:1935}
+      LIVEPEER_PUBLIC_URL: ${LIVEPEER_PUBLIC_URL:-http://localhost:8088}
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - live-temp:/tmp/live
+    - ../presets:/etc/runner/presets:ro
+    - live_runner-state:/var/lib/live-runner
     ports:
-      - "${LIVE_RUNNER_PORT:-8088}:8080"
-      - "${LIVE_SHARED_INGEST_PORT:-1935}:1935"
-
+    - ${LIVE_RUNNER_PORT:-8088}:8080
+    - ${LIVE_SHARED_INGEST_PORT:-1935}:1935
   transcode_runner_intel:
-    image: ${REGISTRY:-tztcloud}/transcode-runner-intel:${TAG:-v1.3.1}
-    profiles: ["intel"]
+    image: ${REGISTRY:-tztcloud}/transcode-runner-intel:${TAG:-v2-local}
+    profiles:
+    - intel
     devices:
-      - /dev/dri:/dev/dri
+    - /dev/dri:/dev/dri
     environment:
-      - RUNNER_ADDR=:8080
-      - MAX_QUEUE_SIZE=5
-      - TEMP_DIR=/tmp/transcode
-      - JOB_TTL_SECONDS=3600
-      - PRESETS_FILE=/etc/runner/presets/transcode.yaml
+      RUNNER_ADDR: :8080
+      MAX_QUEUE_SIZE: '5'
+      PRESETS_FILE: /etc/runner/presets/transcode.yaml
+      STATE_DIR: /var/lib/transcode-runner
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - transcode-temp:/tmp/transcode
+    - ../presets:/etc/runner/presets:ro
+    - transcode_runner-state:/var/lib/transcode-runner
     ports:
-      - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
-
+    - ${TRANSCODE_RUNNER_PORT:-8086}:8080
   abr_runner_intel:
-    image: ${REGISTRY:-tztcloud}/abr-runner-intel:${TAG:-v1.3.1}
-    profiles: ["intel"]
+    image: ${REGISTRY:-tztcloud}/abr-runner-intel:${TAG:-v2-local}
+    profiles:
+    - intel
     devices:
-      - /dev/dri:/dev/dri
+    - /dev/dri:/dev/dri
     environment:
-      - RUNNER_ADDR=:8080
-      - MAX_QUEUE_SIZE=2
-      - TEMP_DIR=/tmp/abr
-      - JOB_TTL_SECONDS=3600
-      - PRESETS_FILE=/etc/runner/presets/abr.yaml
+      RUNNER_ADDR: :8080
+      MAX_QUEUE_SIZE: '2'
+      PRESETS_FILE: /etc/runner/presets/abr.yaml
+      STATE_DIR: /var/lib/abr-runner
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - abr-temp:/tmp/abr
+    - ../presets:/etc/runner/presets:ro
+    - abr_runner-state:/var/lib/abr-runner
     ports:
-      - "${ABR_RUNNER_PORT:-8087}:8080"
-
+    - ${ABR_RUNNER_PORT:-8087}:8080
   live_runner_intel:
-    image: ${REGISTRY:-tztcloud}/live-runner-intel:${TAG:-v1.3.1}
-    profiles: ["intel"]
+    image: ${REGISTRY:-tztcloud}/live-runner-intel:${TAG:-v2-local}
+    profiles:
+    - intel
     devices:
-      - /dev/dri:/dev/dri
+    - /dev/dri:/dev/dri
     environment:
-      - RUNNER_ADDR=:8080
-      - TEMP_DIR=/tmp/live
-      - PRESETS_FILE=/etc/runner/presets/live.yaml
-      - RUNNER_INGEST_PUBLIC_HOST=localhost
-      - RUNNER_SHARED_INGEST_ADDR=:1935
+      LIVE_RUNNER_ADDR: :8080
+      LIVE_RUNNER_STATE_DIR: /var/lib/live-runner
+      LIVE_RUNNER_PRESETS_FILE: /etc/runner/presets/live.yaml
+      LIVE_RUNNER_MASTER_KEY: ${LIVE_RUNNER_MASTER_KEY:-}
+      LIVE_RUNNER_BROKER_TOKEN: ${LIVE_RUNNER_BROKER_TOKEN:-}
+      LIVE_RUNNER_INTERNAL_MEDIA_TOKEN: ${LIVE_RUNNER_INTERNAL_MEDIA_TOKEN:-}
+      LIVEPEER_PUBLIC_RTMP_URL: ${LIVEPEER_PUBLIC_RTMP_URL:-rtmp://localhost:1935}
+      LIVEPEER_PUBLIC_URL: ${LIVEPEER_PUBLIC_URL:-http://localhost:8088}
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - live-temp:/tmp/live
+    - ../presets:/etc/runner/presets:ro
+    - live_runner-state:/var/lib/live-runner
     ports:
-      - "${LIVE_RUNNER_PORT:-8088}:8080"
-      - "${LIVE_SHARED_INGEST_PORT:-1935}:1935"
-
+    - ${LIVE_RUNNER_PORT:-8088}:8080
+    - ${LIVE_SHARED_INGEST_PORT:-1935}:1935
   transcode_runner_nvidia:
-    image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v1.3.1}
-    profiles: ["nvidia"]
+    image: ${REGISTRY:-tztcloud}/transcode-runner-nvidia:${TAG:-v2-local}
+    profiles:
+    - nvidia
     runtime: nvidia
     environment:
-      - RUNNER_ADDR=:8080
-      - MAX_QUEUE_SIZE=5
-      - TEMP_DIR=/tmp/transcode
-      - JOB_TTL_SECONDS=3600
-      - PRESETS_FILE=/etc/runner/presets/transcode.yaml
+      RUNNER_ADDR: :8080
+      MAX_QUEUE_SIZE: '5'
+      PRESETS_FILE: /etc/runner/presets/transcode.yaml
+      STATE_DIR: /var/lib/transcode-runner
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - transcode-temp:/tmp/transcode
+    - ../presets:/etc/runner/presets:ro
+    - transcode_runner-state:/var/lib/transcode-runner
     ports:
-      - "${TRANSCODE_RUNNER_PORT:-8086}:8080"
-
+    - ${TRANSCODE_RUNNER_PORT:-8086}:8080
   abr_runner_nvidia:
-    image: ${REGISTRY:-tztcloud}/abr-runner-nvidia:${TAG:-v1.3.1}
-    profiles: ["nvidia"]
+    image: ${REGISTRY:-tztcloud}/abr-runner-nvidia:${TAG:-v2-local}
+    profiles:
+    - nvidia
     runtime: nvidia
     environment:
-      - RUNNER_ADDR=:8080
-      - MAX_QUEUE_SIZE=2
-      - TEMP_DIR=/tmp/abr
-      - JOB_TTL_SECONDS=3600
-      - PRESETS_FILE=/etc/runner/presets/abr.yaml
+      RUNNER_ADDR: :8080
+      MAX_QUEUE_SIZE: '2'
+      PRESETS_FILE: /etc/runner/presets/abr.yaml
+      STATE_DIR: /var/lib/abr-runner
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - abr-temp:/tmp/abr
+    - ../presets:/etc/runner/presets:ro
+    - abr_runner-state:/var/lib/abr-runner
     ports:
-      - "${ABR_RUNNER_PORT:-8087}:8080"
-
+    - ${ABR_RUNNER_PORT:-8087}:8080
   live_runner_nvidia:
-    image: ${REGISTRY:-tztcloud}/live-runner-nvidia:${TAG:-v1.3.1}
-    profiles: ["nvidia"]
+    image: ${REGISTRY:-tztcloud}/live-runner-nvidia:${TAG:-v2-local}
+    profiles:
+    - nvidia
     runtime: nvidia
     environment:
-      - RUNNER_ADDR=:8080
-      - TEMP_DIR=/tmp/live
-      - PRESETS_FILE=/etc/runner/presets/live.yaml
-      - RUNNER_INGEST_PUBLIC_HOST=localhost
-      - RUNNER_SHARED_INGEST_ADDR=:1935
+      LIVE_RUNNER_ADDR: :8080
+      LIVE_RUNNER_STATE_DIR: /var/lib/live-runner
+      LIVE_RUNNER_PRESETS_FILE: /etc/runner/presets/live.yaml
+      LIVE_RUNNER_MASTER_KEY: ${LIVE_RUNNER_MASTER_KEY:-}
+      LIVE_RUNNER_BROKER_TOKEN: ${LIVE_RUNNER_BROKER_TOKEN:-}
+      LIVE_RUNNER_INTERNAL_MEDIA_TOKEN: ${LIVE_RUNNER_INTERNAL_MEDIA_TOKEN:-}
+      LIVEPEER_PUBLIC_RTMP_URL: ${LIVEPEER_PUBLIC_RTMP_URL:-rtmp://localhost:1935}
+      LIVEPEER_PUBLIC_URL: ${LIVEPEER_PUBLIC_URL:-http://localhost:8088}
     volumes:
-      - ../presets:/etc/runner/presets:ro
-      - live-temp:/tmp/live
+    - ../presets:/etc/runner/presets:ro
+    - live_runner-state:/var/lib/live-runner
     ports:
-      - "${LIVE_RUNNER_PORT:-8088}:8080"
-      - "${LIVE_SHARED_INGEST_PORT:-1935}:1935"
-
+    - ${LIVE_RUNNER_PORT:-8088}:8080
+    - ${LIVE_SHARED_INGEST_PORT:-1935}:1935
 volumes:
-  transcode-temp: {}
-  abr-temp: {}
-  live-temp: {}
+  transcode_runner-state: {}
+  abr_runner-state: {}
+  live_runner-state: {}

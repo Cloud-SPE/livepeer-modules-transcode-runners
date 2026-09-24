@@ -1,0 +1,13 @@
+# Operator summary only. Fetch the full schemas/grants via runner attachment.
+capability_id: video:transcode.live
+protocol: paid-session/v1
+descriptor: rtmp-hls/v1
+request_schema: rtmp-hls-session/v1
+work_unit: output_seconds
+output_profile: live-standard
+metering_rendition: 720p
+readiness: /ready
+create: /v1/sessions
+status: /v1/sessions/{id}
+terminate: /v1/sessions/{id}
+key_issue: /v1/sessions/{id}/stream-keys

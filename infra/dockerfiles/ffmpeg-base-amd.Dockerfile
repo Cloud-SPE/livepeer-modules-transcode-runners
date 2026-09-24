@@ -1,5 +1,5 @@
 ARG REGISTRY=localbuild
-ARG TAG=v1.3.1
+ARG TAG=v2-local
 ARG UBUNTU_VERSION=24.04
 ARG CODECS_IMAGE=${REGISTRY}/codecs-builder:${TAG}
 

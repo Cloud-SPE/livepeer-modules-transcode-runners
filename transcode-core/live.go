@@ -1,91 +1,79 @@
 package transcode
 
 import (
+	"context"
+	"errors"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// LiveTranscodeParams holds parameters for live transcoding.
-type LiveTranscodeParams struct {
-	VideoCodec   string // h264, hevc, av1
-	Width        int    // target width (0 = keep)
-	Height       int    // target height (0 = keep)
-	Bitrate      string // "4M", "2500k"
-	MaxRate      string // VBR ceiling
-	BufSize      string // VBV buffer
-	FPS          int    // target fps (0 = keep)
-	AudioCodec   string // "aac", "copy"
-	AudioBitrate string // "128k"
+// LiveRTMPOutput is one encoded rendition published back into the local media
+// router. URL can contain a short-lived router credential and must not be
+// logged or persisted by callers.
+type LiveRTMPOutput struct {
+	Rendition        ABRRendition
+	URL              string
+	KeyframeInterval time.Duration
 }
 
-// LiveTranscodeCmd builds an ffmpeg command for live MPEG-TS pipe I/O.
-// Input: pipe:0 (stdin), Output: pipe:1 (stdout).
-// Reuses internal helpers for hwaccel, encoder selection, scaling, and tuning.
-func LiveTranscodeCmd(params LiveTranscodeParams, hw HWProfile) *exec.Cmd {
-	args := []string{"-y"}
-
-	// Low-latency input flags
-	args = append(args, "-fflags", "+nobuffer", "-flags", "+low_delay")
-
-	// Hardware acceleration input
+// LiveLadderCmdContext builds one FFmpeg process that decodes a live RTMP
+// source once and publishes every rendition as RTMP. The media router turns
+// those rendition streams into LL-HLS; FFmpeg does not pretend its ordinary
+// HLS muxer implements partial-segment LL-HLS.
+func LiveLadderCmdContext(ctx context.Context, inputURL string, outputs []LiveRTMPOutput, hw HWProfile, probe ProbeResult) (*exec.Cmd, error) {
+	if strings.TrimSpace(inputURL) == "" || len(outputs) == 0 {
+		return nil, errors.New("live input and at least one output are required")
+	}
+	args := []string{
+		"-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:2",
+		"-fflags", "+nobuffer", "-flags", "+low_delay",
+	}
 	args = append(args, buildHWAccelInputArgs(hw)...)
+	args = append(args, "-i", inputURL)
 
-	// MPEG-TS pipe input
-	args = append(args, "-f", "mpegts", "-i", "pipe:0")
+	seen := make(map[string]struct{}, len(outputs))
+	for _, output := range outputs {
+		rendition := output.Rendition
+		if strings.TrimSpace(rendition.Name) == "" || strings.TrimSpace(output.URL) == "" {
+			return nil, errors.New("live output identity and URL are required")
+		}
+		if _, duplicate := seen[rendition.Name]; duplicate {
+			return nil, errors.New("live output rendition names must be unique")
+		}
+		seen[rendition.Name] = struct{}{}
 
-	// Video encoding
-	encoder := EncoderForCodec(params.VideoCodec, hw)
-	args = append(args, "-c:v", encoder)
-
-	// Vendor-specific tuning
-	args = append(args, buildEncoderTuningArgs(encoder)...)
-
-	// Bitrate
-	if params.Bitrate != "" {
-		args = append(args, "-b:v", params.Bitrate)
-	}
-	if params.MaxRate != "" {
-		args = append(args, "-maxrate", params.MaxRate)
-	}
-	if params.BufSize != "" {
-		args = append(args, "-bufsize", params.BufSize)
-	}
-
-	// FPS override
-	if params.FPS > 0 {
-		args = append(args, "-r", strconv.Itoa(params.FPS))
-	}
-
-	// Scale filter (only when dimensions are specified)
-	if params.Width > 0 || params.Height > 0 {
-		var filters []string
-		switch hw.Vendor {
-		case VendorNVIDIA:
-			if hw.HasHWAccel("cuda") {
-				filters = append(filters, "format=nv12", "hwupload_cuda")
+		if rendition.Video == nil {
+			args = append(args, "-map", "0:a:0?", "-vn")
+		} else {
+			if output.KeyframeInterval <= 0 || output.KeyframeInterval > 10*time.Second {
+				return nil, errors.New("live keyframe interval must be between zero and ten seconds")
 			}
-		case VendorAMD:
-			if hw.HasHWAccel("vaapi") {
-				filters = append(filters, "format=nv12", "hwupload")
+			if !strings.EqualFold(rendition.Video.Codec, "h264") && !strings.EqualFold(rendition.Video.Codec, "avc") {
+				return nil, errors.New("RTMP live outputs require H.264 video")
+			}
+			args = append(args, "-map", "0:v:0", "-map", "0:a:0?")
+			args = append(args, buildHLSVideoArgs(rendition, hw)...)
+			seconds := strconv.FormatFloat(output.KeyframeInterval.Seconds(), 'f', 3, 64)
+			args = append(args, "-force_key_frames", "expr:gte(t,n_forced*"+seconds+")")
+			if filters := buildLiveFilterGraph(rendition, hw, probe); filters != "" {
+				args = append(args, "-vf", filters)
 			}
 		}
-		filters = append(filters, buildScaleFilter(params.Width, params.Height, hw))
-		args = append(args, "-vf", strings.Join(filters, ","))
+		args = append(args, buildHLSAudioArgs(rendition)...)
+		args = append(args, "-f", "flv", output.URL)
 	}
+	return exec.CommandContext(ctx, "ffmpeg", args...), nil
+}
 
-	// Audio encoding
-	audioCodec := params.AudioCodec
-	if audioCodec == "" {
-		audioCodec = "aac"
+func buildLiveFilterGraph(rendition ABRRendition, hw HWProfile, probe ProbeResult) string {
+	video := rendition.Video
+	if video == nil || video.Width <= 0 || video.Height <= 0 || (video.Width == probe.Width && video.Height == probe.Height) {
+		return ""
 	}
-	args = append(args, "-c:a", audioCodec)
-	if audioCodec != "copy" && params.AudioBitrate != "" {
-		args = append(args, "-b:a", params.AudioBitrate)
-	}
-
-	// MPEG-TS pipe output (no -movflags, streaming format)
-	args = append(args, "-f", "mpegts", "pipe:1")
-
-	return exec.Command("ffmpeg", args...)
+	// LiveLadderCmdContext requests hardware-output decoding when an accelerator
+	// is available, so frames are already resident on that device. Adding an
+	// upload filter here would upload an already-hardware frame and fail.
+	return buildScaleFilter(video.Width, video.Height, hw)
 }

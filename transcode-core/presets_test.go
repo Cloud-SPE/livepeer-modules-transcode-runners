@@ -195,17 +195,6 @@ func TestFindPreset(t *testing.T) {
 	}
 }
 
-func TestStrictGPUIncompatibleFeatures(t *testing.T) {
-	opts := TranscodeOptions{
-		SubtitlePath:  "/tmp/subs.srt",
-		WatermarkPath: "/tmp/logo.png",
-	}
-	features := StrictGPUIncompatibleFeatures(opts, true)
-	if len(features) != 3 {
-		t.Fatalf("expected 3 incompatible features, got %d: %v", len(features), features)
-	}
-}
-
 func TestEncoderForCodec(t *testing.T) {
 	hwGPU := HWProfile{
 		GPUName:  "RTX 4090",

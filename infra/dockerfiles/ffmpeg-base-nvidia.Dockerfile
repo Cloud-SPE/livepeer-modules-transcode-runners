@@ -1,5 +1,5 @@
 ARG REGISTRY=localbuild
-ARG TAG=v1.4.1
+ARG TAG=v2-local
 # CUDA 12.x is the last line that still compiles for Pascal (sm_61, e.g.
 # GTX 1080). CUDA 13 dropped it ("nvcc fatal: Unsupported gpu
 # architecture 'compute_61'"). The 580+ host driver runs 12.x runtimes
