@@ -39,3 +39,50 @@ media and verify advancing HLS, not just list available encoders.
 
 The two old `LIVE-OPTION-B-*` documents describe the retired v0 API and are
 historical only. Current source types, fixtures, and [API.md](API.md) govern v2.
+
+## Publisher inactivity and browser playback
+
+Implemented under `runners-2qp` and `runners-4v4`.
+
+`LIVE_RUNNER_INITIAL_PUBLISH_TIMEOUT` defaults to `5m` and ends sessions
+whose publisher never connects. `LIVE_RUNNER_RECONNECT_GRACE` defaults to
+`2m`, starting at the first observed RTMP disconnect. Reconnecting cancels
+that deadline. A deadline already persisted retains its value across restart
+or configuration changes. Unknown router/API failures do not count as an
+offline observation. Browser presence never controls runner lifetime.
+Both timeouts end normally with the existing `publisher_disconnect` reason;
+final usage is cumulative finalized output seconds, not waiting time. Terminal
+callbacks use the existing durable retry queue. Connected publishers with no
+output still use the independent output stall/failure deadlines.
+
+Public HLS supports cross-origin GET/HEAD and Range preflight; management APIs
+do not inherit this CORS policy. Upstream MediaMTX cookies are private and
+isolated by rendition. Playback becomes unavailable when the session ends.
+
+For an HTTPS portal, set `LIVEPEER_PUBLIC_URL=https://live.example.com` before
+creating sessions. A TLS edge is required; setting the variable alone does not
+serve TLS. Existing session descriptors retain their originally issued URLs.
+Use an existing reverse proxy or the standalone Caddy configuration:
+
+```sh
+LIVE_HLS_HOST=live.example.com LIVE_HLS_UPSTREAM=host.docker.internal:8088 \
+  docker compose -f infra/compose/docker-compose.live-https.yml up -d
+```
+
+Point that hostname's DNS to the runner host and make ports 80/443 reachable
+for certificate issuance. If those ports already belong to an existing proxy,
+add the HLS route there instead. Set `LIVE_HLS_UPSTREAM` to the actual private
+runner HTTP endpoint (including its port); it must be reachable from the edge
+container. Keep runner management and metrics private. The bundled edge
+proxies HLS assets and preserves Range and LL-HLS query parameters. It also
+forwards the grant-authenticated stream-key issuance and status URLs, because
+`LIVEPEER_PUBLIC_URL` supplies those descriptor URLs as well. Without that
+stream-key route, the gateway cannot start or renew its RTMP relay. The runner
+continues enforcing grants; CORS applies only to HLS, not these runtime APIs. It does not
+change RTMP ingress or attach the runner to a broker.
+
+After deployment, create a fresh session, publish media, and verify HTTPS
+master, both video/audio rendition playlists, and segments from the portal
+origin. Verify disconnect/reconnect within grace, automatic ending beyond
+grace, and broker/gateway final settlement. Source tests cannot certify DNS,
+certificates, real GPU encoding or a paid deployment.

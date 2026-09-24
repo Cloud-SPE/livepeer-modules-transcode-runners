@@ -75,6 +75,9 @@ type SessionRecordV1 struct {
 	LastSequence              uint64                     `json:"last_sequence"`
 	MeteredMicroseconds       uint64                     `json:"metered_microseconds,omitempty"`
 	MeteredSegmentSHA256      []string                   `json:"metered_segment_sha256,omitempty"`
+	PublisherSeen             bool                       `json:"publisher_seen,omitempty"`
+	PublisherOfflineSince     string                     `json:"publisher_offline_since,omitempty"`
+	PublisherDeadline         string                     `json:"publisher_deadline,omitempty"`
 	IngestOnlineAt            string                     `json:"ingest_online_at,omitempty"`
 	FirstFinalizedSegmentAt   string                     `json:"first_finalized_segment_at,omitempty"`
 	LastFinalizedSegmentAt    string                     `json:"last_finalized_segment_at,omitempty"`
@@ -459,12 +462,18 @@ func (s *EncryptedFileSessionStoreV1) RecordIngestPresence(brokerSessionID strin
 	changed := false
 	if online && record.IngestOnlineAt == "" {
 		record.IngestOnlineAt = stamp
+		record.PublisherSeen = true
+		record.PublisherOfflineSince = ""
+		record.PublisherDeadline = ""
 		record.OutputState = OutputStateWaitingV1
 		record.OutputStateSince = stamp
 		changed = true
 	}
 	if !online && record.IngestOnlineAt != "" {
 		record.IngestOnlineAt = ""
+		record.PublisherSeen = true
+		record.PublisherOfflineSince = stamp
+		record.PublisherDeadline = ""
 		record.OutputState = OutputStateWaitingV1
 		record.OutputStateSince = stamp
 		record.LadderFailureWindowAt = ""
@@ -475,6 +484,62 @@ func (s *EncryptedFileSessionStoreV1) RecordIngestPresence(brokerSessionID strin
 		return nil
 	}
 	return s.saveLocked(record)
+}
+
+// ExpireAbsentPublisher is called only after a definitive offline observation.
+// The decision and stopping intent commit together, so a concurrent observed
+// reconnect cannot leave a stale timeout that later terminates the session.
+func (s *EncryptedFileSessionStoreV1) ExpireAbsentPublisher(id string, now time.Time, initialWait, reconnectGrace time.Duration) (bool, error) {
+	if now.IsZero() || initialWait <= 0 || reconnectGrace <= 0 {
+		return false, errors.New("publisher deadlines are invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, _, err := s.loadLocked(id)
+	if err != nil {
+		return false, err
+	}
+	if record.State != "active" || record.Stopping {
+		return false, ErrSessionTerminalV1
+	}
+	if record.IngestOnlineAt != "" {
+		return false, nil
+	}
+	changed := false
+	if record.PublisherDeadline == "" {
+		base := record.OutputStateSince
+		wait := initialWait
+		if record.PublisherSeen || record.LastFinalizedSegmentAt != "" {
+			wait = reconnectGrace
+			base = record.PublisherOfflineSince
+			if base == "" {
+				base = now.UTC().Format(time.RFC3339Nano)
+				record.PublisherOfflineSince = base
+			}
+		}
+		start, err := time.Parse(time.RFC3339Nano, base)
+		if err != nil {
+			return false, err
+		}
+		record.PublisherDeadline = start.Add(wait).UTC().Format(time.RFC3339Nano)
+		changed = true
+	}
+	deadline, err := time.Parse(time.RFC3339Nano, record.PublisherDeadline)
+	if err != nil {
+		return false, err
+	}
+	expired := !now.Before(deadline)
+	if expired {
+		record.Stopping = true
+		record.PendingCloseReason = "publisher_disconnect"
+		record.PendingTerminalState = "ended"
+		record.PendingKeyActivationID = ""
+		changed = true
+	}
+	if changed {
+		err = s.saveLocked(record)
+	}
+	return expired && err == nil, err
 }
 
 func (s *EncryptedFileSessionStoreV1) RecordLadderRestart(brokerSessionID, code string, eventTime time.Time, window time.Duration) (uint32, error) {

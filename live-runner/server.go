@@ -129,6 +129,8 @@ func (s *LiveRunnerServerV1) Handler(mediaAuthorizer http.Handler) (http.Handler
 	})
 	if s.HLS != nil {
 		mux.Handle("GET /v1/public/sessions/{id}/master.m3u8", s.HLS)
+		mux.Handle("OPTIONS /v1/public/sessions/{id}/master.m3u8", s.HLS)
+		mux.Handle("OPTIONS /v1/public/sessions/{id}/{rendition}/{asset}", s.HLS)
 		mux.Handle("GET /v1/public/sessions/{id}/{rendition}/{asset}", s.HLS)
 	}
 	mux.Handle("DELETE /v1/sessions/{id}", s.brokerAuthV1(http.HandlerFunc(s.handleTerminateV1)))

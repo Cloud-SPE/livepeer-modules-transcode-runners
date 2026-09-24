@@ -27,7 +27,7 @@ func TestLoadLiveRunnerConfigRequiresSecretsAndPublicCoordinates(t *testing.T) {
 	if config.ListenAddress != ":8080" || config.MetricsAddress != "127.0.0.1:9090" || config.MediaMTX.APIAddress != "127.0.0.1:9997" || config.MaxConcurrent != 0 || config.CallbackPoll != 250*time.Millisecond || config.CallbackRetryInitial != 500*time.Millisecond || config.CallbackRetryMaximum != 30*time.Second || len(config.MasterKey) != 32 || config.HardwareTarget != "auto" {
 		t.Fatal("valid configuration did not produce the expected safe defaults")
 	}
-	if config.OutputStallAfter != 20*time.Second || config.OutputFailAfter != time.Minute || config.RestartInitial != 250*time.Millisecond || config.RestartMaximum != 5*time.Second || config.RestartLimit != 5 {
+	if config.InitialPublishWait != 5*time.Minute || config.ReconnectGrace != 2*time.Minute || config.OutputStallAfter != 20*time.Second || config.OutputFailAfter != time.Minute || config.RestartInitial != 250*time.Millisecond || config.RestartMaximum != 5*time.Second || config.RestartLimit != 5 {
 		t.Fatalf("unexpected output health defaults: %#v", config)
 	}
 	if config.PublicRTMPBase != "rtmps://runner.example:1936" || config.PublicHTTPBase != "https://runner.example/r/live-runner" {
@@ -105,6 +105,23 @@ func TestLoadLiveRunnerConfigValidatesOutputHealthPolicy(t *testing.T) {
 		t.Fatalf("invalid output deadline policy error=%v", err)
 	}
 	values["LIVE_RUNNER_OUTPUT_FAIL_DEADLINE"] = "90s"
+	for _, name := range []string{"LIVE_RUNNER_INITIAL_PUBLISH_TIMEOUT", "LIVE_RUNNER_RECONNECT_GRACE"} {
+		values[name] = "0s"
+		if _, err := LoadLiveRunnerConfigV1(func(name string) string { return values[name] }); err == nil {
+			t.Fatalf("accepted zero %s", name)
+		}
+		values[name] = "7s"
+		cfg, err := LoadLiveRunnerConfigV1(func(name string) string { return values[name] })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if name == "LIVE_RUNNER_INITIAL_PUBLISH_TIMEOUT" && cfg.InitialPublishWait != 7*time.Second {
+			t.Fatal("initial wait override ignored")
+		}
+		if name == "LIVE_RUNNER_RECONNECT_GRACE" && cfg.ReconnectGrace != 7*time.Second {
+			t.Fatal("reconnect override ignored")
+		}
+	}
 	values["LIVE_RUNNER_LADDER_RESTART_LIMIT"] = "0"
 	if _, err := LoadLiveRunnerConfigV1(func(name string) string { return values[name] }); err == nil || !strings.Contains(err.Error(), "RESTART_LIMIT") {
 		t.Fatalf("invalid restart limit error=%v", err)

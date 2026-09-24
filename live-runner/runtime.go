@@ -366,7 +366,25 @@ func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSe
 		outputs = append(outputs, transcode.LiveRTMPOutput{Rendition: rendition, URL: c.routerRTMPBase + "/" + outputPath + "?token=" + url.QueryEscape(internalToken), KeyframeInterval: time.Duration(preset.SegmentDuration) * time.Second})
 	}
 	for {
-		if _, err := c.router.WaitForRTMPPublisher(runContext, ingestPath, c.pollInterval); err != nil {
+		publisherReady := make(chan error, 1)
+		go func() {
+			_, err := c.router.WaitForRTMPPublisher(runContext, ingestPath, c.pollInterval)
+			publisherReady <- err
+		}()
+		select {
+		case err := <-publisherReady:
+			if err != nil {
+				return
+			}
+		case reason := <-meterDone:
+			cancel()
+			<-publisherReady
+			if reason != "" {
+				c.finishSession(record, cancel, reason, nil)
+			}
+			return
+		case <-runContext.Done():
+			<-publisherReady
 			return
 		}
 		c.observeGPUPressure(runContext, record.RunnerSessionID)
@@ -384,7 +402,7 @@ func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSe
 			case exit = <-processDone:
 			case reason := <-meterDone:
 				if reason != "" {
-					c.failSession(record, cancel, reason, processDone)
+					c.finishSession(record, cancel, reason, processDone)
 				}
 				return
 			case <-runContext.Done():
@@ -398,7 +416,6 @@ func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSe
 		}
 		publisher, publisherErr := c.router.Path(runContext, ingestPath)
 		if publisherErr != nil || !publisher.Online || publisher.Source == nil {
-			_ = c.store.RecordIngestPresence(record.BrokerSessionID, false, c.now())
 			continue
 		}
 		attempts, err := c.store.RecordLadderRestart(record.BrokerSessionID, exit.Code, c.now(), c.failureWindow)
@@ -410,7 +427,7 @@ func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSe
 			if stalled, _ := c.store.RecordOutputStalled(record.BrokerSessionID, c.now()); stalled {
 				c.metrics.RecordSessionStalled()
 			}
-			c.failSession(record, cancel, "output_failed", nil)
+			c.finishSession(record, cancel, "output_failed", nil)
 			return
 		}
 		backoff := c.restartInitial
@@ -428,7 +445,7 @@ func (c *LiveRuntimeCoordinatorV1) run(ctx context.Context, active *activeLiveSe
 		case reason := <-meterDone:
 			timer.Stop()
 			if reason != "" {
-				c.failSession(record, cancel, reason, nil)
+				c.finishSession(record, cancel, reason, nil)
 			}
 			return
 		case <-timer.C:
@@ -456,8 +473,14 @@ func (c *LiveRuntimeCoordinatorV1) observeGPUPressure(ctx context.Context, runne
 	c.log.Info("live ladder GPU pressure", "runner_session_id", runnerSessionID, "gpu_count", pressure.GPUCount, "encoder_sessions", pressure.EncoderSessions, "memory_used_mib", pressure.MemoryUsedMiB)
 }
 
-func (c *LiveRuntimeCoordinatorV1) failSession(record SessionRecordV1, cancel context.CancelFunc, reason string, processDone <-chan LiveLadderExitV1) {
-	stopping, _, err := c.store.BeginFailure(record.BrokerSessionID, reason)
+func (c *LiveRuntimeCoordinatorV1) finishSession(record SessionRecordV1, cancel context.CancelFunc, reason string, processDone <-chan LiveLadderExitV1) {
+	var stopping SessionRecordV1
+	var err error
+	if reason == "publisher_disconnect" {
+		stopping, _, err = c.store.BeginTermination(record.BrokerSessionID, reason)
+	} else {
+		stopping, _, err = c.store.BeginFailure(record.BrokerSessionID, reason)
+	}
 	if err != nil || !stopping.Stopping {
 		return
 	}
@@ -466,19 +489,19 @@ func (c *LiveRuntimeCoordinatorV1) failSession(record SessionRecordV1, cancel co
 	defer cleanupCancel()
 	ingestPath, _ := IngestMediaPathV1(record.RunnerSessionID)
 	if err := c.router.KickPublisher(ctx, ingestPath); err != nil {
-		c.log.Warn("failed to kick publisher after live output failure", "runner_session_id", record.RunnerSessionID, "error", err)
+		c.log.Warn("failed to kick publisher during live termination", "runner_session_id", record.RunnerSessionID, "error", err)
 		return
 	}
 	if processDone != nil {
 		select {
 		case <-processDone:
 		case <-ctx.Done():
-			c.log.Warn("timed out joining failed live ladder", "runner_session_id", record.RunnerSessionID)
+			c.log.Warn("timed out joining live ladder", "runner_session_id", record.RunnerSessionID)
 			return
 		}
 	}
 	if _, err := FinalizeLiveTerminationV1(c.store, record.BrokerSessionID, c.now()); err != nil {
-		c.log.Warn("failed to finalize live output failure", "runner_session_id", record.RunnerSessionID, "error", err)
+		c.log.Warn("failed to finalize live termination", "runner_session_id", record.RunnerSessionID, "error", err)
 	}
 }
 

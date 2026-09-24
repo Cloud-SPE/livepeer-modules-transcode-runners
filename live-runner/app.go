@@ -43,6 +43,8 @@ type LiveRunnerConfigV1 struct {
 	HardwareTarget       string
 	OutputStallAfter     time.Duration
 	OutputFailAfter      time.Duration
+	InitialPublishWait   time.Duration
+	ReconnectGrace       time.Duration
 	RestartInitial       time.Duration
 	RestartMaximum       time.Duration
 	RestartWindow        time.Duration
@@ -132,6 +134,14 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 	if err != nil || failAfter <= stallAfter {
 		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_OUTPUT_FAIL_DEADLINE must exceed LIVE_RUNNER_OUTPUT_STALL_DEADLINE")
 	}
+	initialPublishWait, err := duration("LIVE_RUNNER_INITIAL_PUBLISH_TIMEOUT", 5*time.Minute)
+	if err != nil {
+		return LiveRunnerConfigV1{}, err
+	}
+	reconnectGrace, err := duration("LIVE_RUNNER_RECONNECT_GRACE", 2*time.Minute)
+	if err != nil {
+		return LiveRunnerConfigV1{}, err
+	}
 	restartInitial, err := duration("LIVE_RUNNER_LADDER_RESTART_INITIAL", 250*time.Millisecond)
 	if err != nil {
 		return LiveRunnerConfigV1{}, err
@@ -172,6 +182,7 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 		HLSHeaderTimeout: 15 * time.Second,
 		HardwareTarget:   hardwareTarget,
 		OutputStallAfter: stallAfter, OutputFailAfter: failAfter,
+		InitialPublishWait: initialPublishWait, ReconnectGrace: reconnectGrace,
 		RestartInitial: restartInitial, RestartMaximum: restartMaximum, RestartWindow: restartWindow, RestartLimit: restartLimit,
 		CallbackRetryInitial: callbackRetryInitial, CallbackRetryMaximum: callbackRetryMaximum,
 		GPUAdmissionLock: getenv("GPU_ADMISSION_LOCK"),
@@ -217,6 +228,8 @@ func RunLiveRunnerV1(ctx context.Context, config LiveRunnerConfigV1) error {
 	if err != nil {
 		return err
 	}
+	meter.initialPublishWait = config.InitialPublishWait
+	meter.reconnectGrace = config.ReconnectGrace
 	dispatcher, err := NewCallbackDispatcherV1(store, nil, config.RequestTimeout)
 	if err != nil {
 		return err

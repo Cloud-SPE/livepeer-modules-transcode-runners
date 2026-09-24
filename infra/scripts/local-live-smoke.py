@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Exercise real local RTMP/HLS through a Docker runner; never calls LOC."""
-import base64, json, os, secrets, subprocess, threading, time, urllib.request, urllib.error
+import base64, json, os, re, secrets, subprocess, threading, time, urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urljoin
 image = os.environ.get('LIVE_SMOKE_IMAGE', 'localbuild/standalone-live-validation:v2-local')
@@ -20,14 +20,16 @@ class Callback(BaseHTTPRequestHandler):
 server = ThreadingHTTPServer(('127.0.0.1', 18089), Callback)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 token = secrets.token_hex(32)
-env = {'LIVE_RUNNER_ADDR': '127.0.0.1:18088', 'LIVE_RUNNER_METRICS_ADDR': '127.0.0.1:19091', 'LIVE_RUNNER_MASTER_KEY': base64.b64encode(secrets.token_bytes(32)).decode(), 'LIVE_RUNNER_BROKER_TOKEN': token, 'LIVE_RUNNER_INTERNAL_MEDIA_TOKEN': secrets.token_hex(32), 'LIVEPEER_PUBLIC_URL': base, 'LIVEPEER_PUBLIC_RTMP_URL': 'rtmp://127.0.0.1:11935', 'LIVE_RUNNER_MEDIAMTX_RTMP_ADDR': '127.0.0.1:11935', 'LIVE_RUNNER_MEDIAMTX_HLS_ADDR': '127.0.0.1:18888', 'LIVE_RUNNER_MEDIAMTX_API_ADDR': '127.0.0.1:19997', 'LIVE_RUNNER_MEDIAMTX_METRICS_ADDR': '127.0.0.1:19998', 'LIVE_RUNNER_ROUTER_RTMP_BASE': 'rtmp://127.0.0.1:11935', 'LIVE_RUNNER_MEDIAMTX_AUTH_URL': base + '/internal/mediamtx/auth', 'LIVE_RUNNER_HARDWARE': 'cpu'}
+env = {'LIVE_RUNNER_ADDR': '127.0.0.1:18088', 'LIVE_RUNNER_METRICS_ADDR': '127.0.0.1:19091', 'LIVE_RUNNER_MASTER_KEY': base64.b64encode(secrets.token_bytes(32)).decode(), 'LIVE_RUNNER_BROKER_TOKEN': token, 'LIVE_RUNNER_INTERNAL_MEDIA_TOKEN': secrets.token_hex(32), 'LIVEPEER_PUBLIC_URL': base, 'LIVEPEER_PUBLIC_RTMP_URL': 'rtmp://127.0.0.1:11935', 'LIVE_RUNNER_MEDIAMTX_RTMP_ADDR': '127.0.0.1:11935', 'LIVE_RUNNER_MEDIAMTX_HLS_ADDR': '127.0.0.1:18888', 'LIVE_RUNNER_MEDIAMTX_API_ADDR': '127.0.0.1:19997', 'LIVE_RUNNER_MEDIAMTX_METRICS_ADDR': '127.0.0.1:19998', 'LIVE_RUNNER_ROUTER_RTMP_BASE': 'rtmp://127.0.0.1:11935', 'LIVE_RUNNER_MEDIAMTX_AUTH_URL': base + '/internal/mediamtx/auth', 'LIVE_RUNNER_HARDWARE': 'cpu', 'LIVE_RUNNER_INITIAL_PUBLISH_TIMEOUT': '15s', 'LIVE_RUNNER_RECONNECT_GRACE': '10s'}
 
 def request(url, method='GET', data=None, bearer=None):
-    headers = {'Content-Type': 'application/json'}
+    headers = {'Content-Type': 'application/json', 'Origin': 'https://portal.example'}
     if bearer:
         headers['Authorization'] = 'Bearer ' + bearer
     req = urllib.request.Request(url, data=None if data is None else json.dumps(data).encode(), method=method, headers=headers)
     with urllib.request.urlopen(req, timeout=10) as r:
+        if '/v1/public/sessions/' in url and not url.endswith('/status'):
+            assert r.headers.get('Access-Control-Allow-Origin') == '*', 'missing HLS CORS'
         return r.read()
 
 def js(url, method='GET', data=None, bearer=None):
@@ -71,13 +73,22 @@ try:
             variants = [l for l in master.splitlines() if l and (not l.startswith('#'))]
             if not variants:
                 continue
-            varianturl = urljoin(coords['hls_url'], variants[0])
-            playlist = request(varianturl).decode()
-            segments = [l for l in playlist.splitlines() if l and (not l.startswith('#'))]
-            if not segments:
+            if len(variants) < 2:
                 continue
-            segment = request(urljoin(varianturl, segments[-1]))
-            assert len(segment) > 0
+            for variant in variants:
+                varianturl = urljoin(coords['hls_url'], variant)
+                playlist = request(varianturl).decode()
+                media = [l for l in playlist.splitlines() if l and not l.startswith('#')]
+                media += re.findall(r'URI="([^"\n]+\.m3u8)"', playlist)
+                assert media, 'no media playlists'
+                for uri in media:
+                    mediaurl = urljoin(varianturl, uri)
+                    media_playlist = request(mediaurl).decode()
+                    segments = [l for l in media_playlist.splitlines() if l and not l.startswith('#')]
+                    if not segments:
+                        raise TimeoutError('waiting for finalized segments')
+                    segment = request(urljoin(mediaurl, segments[-1]))
+                    assert len(segment) > 0
             playable = True
             print('HLS master + rendition + finalized media segment fetched:', len(segment), 'bytes')
             break
@@ -115,6 +126,33 @@ try:
         raise Exception('HLS still served after close')
     except urllib.error.HTTPError as e:
         assert e.code >= 400
+    publisher.communicate(timeout=10)
+    # A fresh session that never publishes must end with zero usage.
+    body['session_id'] += '-never'
+    never = js(base + '/v1/sessions', 'POST', body, token)
+    def wait_ended(session_id, timeout=25):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = js(base + '/v1/sessions/' + session_id, bearer=token)
+            if status['state'] == 'ended':
+                assert status['close_reason'] == 'publisher_disconnect'
+                return status
+            time.sleep(0.25)
+        raise Exception('automatic termination did not arrive')
+    assert wait_ended(never['runner_session_id'])['usage']['total'] == 0
+    body['session_id'] += '-disconnect'
+    disconnected = js(base + '/v1/sessions', 'POST', body, token)
+    public = disconnected['runtime']['public']
+    key = js(public['key_issue_url'], 'POST', {'request_id':'smoke-idle', 'audience':'gateway-relay'}, disconnected['runtime']['grants'][0]['secret'])
+    publisher = publish(public['rtmp_url'] + '/' + key['stream_key'], 20)
+    publisher.communicate(timeout=30)
+    final = wait_ended(disconnected['runner_session_id'])
+    assert final['usage']['total'] > 0, 'disconnect did not preserve measured usage'
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not any(e.get('event_type') == 'session.ended' and e.get('close_reason') == 'publisher_disconnect' for e in events):
+        time.sleep(0.1)
+    assert any(e.get('event_type') == 'session.ended' and e.get('close_reason') == 'publisher_disconnect' for e in events), 'no automatic end callback'
+    print('PASS: never-published and disconnected auto termination, final measured usage, terminal callbacks')
     assert events, 'no callback events'
     print('PASS: replay, RTMP publish, advancing HLS, measured output_seconds, key rotation/revocation, resumed output, idempotent terminate; callbacks:', len(events))
 finally:

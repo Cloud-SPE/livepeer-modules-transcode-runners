@@ -131,13 +131,7 @@ func TestLiveHLSRealMediaMTXPlaylistIsPubliclyReachable(t *testing.T) {
 			safeAuth = append(safeAuth, value.Protocol+":"+value.Action+":"+value.Path)
 		}
 		authMu.Unlock()
-		handler.mu.RLock()
-		cookieNames := make([]string, 0, len(handler.cookies[response.RunnerSessionID]))
-		for _, cookie := range handler.cookies[response.RunnerSessionID] {
-			cookieNames = append(cookieNames, cookie.Name+":"+cookie.Path)
-		}
-		handler.mu.RUnlock()
-		t.Fatalf("real LL-HLS parts=%d %q auth=%v cookies=%v", parts.Code, parts.Body.String(), safeAuth, cookieNames)
+		t.Fatalf("real LL-HLS parts=%d %q auth=%v", parts.Code, parts.Body.String(), safeAuth)
 	}
 	master := hlsRequestV1(t, handler, response.RunnerSessionID, "master.m3u8", "")
 	if master.Code != http.StatusOK || !strings.Contains(master.Body.String(), "720p/index.m3u8") {

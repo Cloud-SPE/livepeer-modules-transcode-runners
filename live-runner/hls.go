@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"path"
 	"strconv"
@@ -24,7 +25,7 @@ type HLSHandlerV1 struct {
 	client  *http.Client
 	timeout time.Duration
 	mu      sync.RWMutex
-	cookies map[string][]*http.Cookie
+	cookies map[string]map[string]*cookiejar.Jar
 }
 
 func NewHLSHandlerV1(store *EncryptedFileSessionStoreV1, presets []transcode.ABRPreset, upstream string, transport http.RoundTripper, timeout time.Duration) (*HLSHandlerV1, error) {
@@ -47,15 +48,25 @@ func NewHLSHandlerV1(store *EncryptedFileSessionStoreV1, presets []transcode.ABR
 		base.DisableCompression = true
 		transport = base
 	}
-	return &HLSHandlerV1{store: store, presets: byName, baseURL: strings.TrimRight(upstream, "/"), timeout: timeout, cookies: make(map[string][]*http.Cookie), client: &http.Client{
+	return &HLSHandlerV1{store: store, presets: byName, baseURL: strings.TrimRight(upstream, "/"), timeout: timeout, cookies: make(map[string]map[string]*cookiejar.Jar), client: &http.Client{
 		Transport:     transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}, nil
 }
 
 func (h *HLSHandlerV1) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	// These are public bearer-by-URL assets; upstream cookies never reach clients.
+	writer.Header().Set("Access-Control-Allow-Origin", "*")
+	writer.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Retry-After")
+	if request.Method == http.MethodOptions {
+		writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		writer.Header().Set("Access-Control-Allow-Headers", "Range")
+		writer.Header().Set("Access-Control-Max-Age", "600")
+		writer.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if request.Method != http.MethodGet && request.Method != http.MethodHead {
-		writer.Header().Set("Allow", "GET, HEAD")
+		writer.Header().Set("Allow", "GET, HEAD, OPTIONS")
 		writeRunnerErrorV1(writer, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
@@ -156,6 +167,7 @@ func (h *HLSHandlerV1) fetchPlaylist(ctx context.Context, runnerID, mediaPath st
 			return "", err
 		}
 	}
+	h.storeSessionCookies(runnerID, request.URL, response.Cookies())
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
@@ -194,6 +206,7 @@ func (h *HLSHandlerV1) proxyAsset(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 	}
+	h.storeSessionCookies(runnerID, upstream.URL, response.Cookies())
 	defer response.Body.Close()
 	for _, name := range []string{"Content-Type", "Content-Length", "Accept-Ranges", "Content-Range"} {
 		if value := response.Header.Get(name); value != "" {
@@ -227,10 +240,8 @@ func (h *HLSHandlerV1) followMediaMTXCookieCheck(ctx context.Context, runnerID s
 		return nil, errors.New("HLS cookie check request failed")
 	}
 	follow.Header.Set("Range", original.Header.Get("Range"))
-	for _, cookie := range redirect.Cookies() {
-		follow.AddCookie(cookie)
-	}
-	h.storeSessionCookies(runnerID, redirect.Cookies())
+	h.storeSessionCookies(runnerID, original.URL, redirect.Cookies())
+	h.addSessionCookies(runnerID, follow)
 	response, err := h.client.Do(follow)
 	if err != nil {
 		return nil, err
@@ -239,39 +250,54 @@ func (h *HLSHandlerV1) followMediaMTXCookieCheck(ctx context.Context, runnerID s
 		response.Body.Close()
 		return nil, errors.New("repeated HLS redirect")
 	}
-	h.storeSessionCookies(runnerID, response.Cookies())
+	h.storeSessionCookies(runnerID, follow.URL, response.Cookies())
 	return response, nil
 }
 
+// MediaMTX may issue the same cookie name and Path for different muxers.
+// Isolate jars by rendition as well as session, and honor normal cookie scope.
 func (h *HLSHandlerV1) addSessionCookies(runnerID string, request *http.Request) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for _, cookie := range h.cookies[runnerID] {
-		copy := *cookie
-		request.AddCookie(&copy)
+	jar := h.cookies[runnerID][path.Dir(request.URL.Path)]
+	if jar != nil {
+		for _, cookie := range jar.Cookies(request.URL) {
+			request.AddCookie(cookie)
+		}
 	}
 }
 
-func (h *HLSHandlerV1) storeSessionCookies(runnerID string, cookies []*http.Cookie) {
+func (h *HLSHandlerV1) storeSessionCookies(runnerID string, target *url.URL, cookies []*http.Cookie) {
 	if len(cookies) == 0 {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	byName := make(map[string]*http.Cookie, len(h.cookies[runnerID])+len(cookies))
-	for _, cookie := range h.cookies[runnerID] {
-		copy := *cookie
-		byName[cookie.Name] = &copy
+	if h.cookies[runnerID] == nil {
+		h.cookies[runnerID] = make(map[string]*cookiejar.Jar)
 	}
+	key := path.Dir(target.Path)
+	jar := h.cookies[runnerID][key]
+	if jar == nil {
+		jar, _ = cookiejar.New(nil)
+		h.cookies[runnerID][key] = jar
+	}
+	// MediaMTX marks its browser cookies Secure even on this private HTTP
+	// loopback hop. Terminate that transport attribute here; never forward these
+	// cookies to the browser. Keep domain, path and expiry checks intact.
+	localCookies := make([]*http.Cookie, 0, len(cookies))
 	for _, cookie := range cookies {
-		copy := *cookie
-		byName[cookie.Name] = &copy
+		local := *cookie
+		local.Secure = false
+		localCookies = append(localCookies, &local)
 	}
-	merged := make([]*http.Cookie, 0, len(byName))
-	for _, cookie := range byName {
-		merged = append(merged, cookie)
-	}
-	h.cookies[runnerID] = merged
+	jar.SetCookies(target, localCookies)
+}
+
+func (h *HLSHandlerV1) forgetSessionCookies(runnerID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.cookies, runnerID)
 }
 
 func renditionAssetPathV1(runnerID string, preset transcode.ABRPreset, asset string) (string, bool) {

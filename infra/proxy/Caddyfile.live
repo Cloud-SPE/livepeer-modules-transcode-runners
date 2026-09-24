@@ -1,0 +1,29 @@
+# Use a dedicated hostname whose DNS points to this host. Only public HLS is
+# and grant-authenticated runtime routes are exposed; broker management and
+# metrics stay private.
+{$LIVE_HLS_HOST:localhost} {
+	@hls {
+		method GET HEAD OPTIONS
+		path_regexp hls ^/v1/public/sessions/[A-Za-z0-9_-]+/(master\.m3u8|[A-Za-z0-9_-]+/[A-Za-z0-9_-]+\.(m3u8|mp4|m4s|ts))$
+	}
+	@runtimeKey {
+		method POST
+		path_regexp runtimeKey ^/v1/sessions/[A-Za-z0-9_-]+/stream-keys$
+	}
+	@runtimeStatus {
+		method GET
+		path_regexp runtimeStatus ^/v1/public/sessions/[A-Za-z0-9_-]+/status$
+	}
+	handle @runtimeKey {
+		reverse_proxy {$LIVE_HLS_UPSTREAM:host.docker.internal:8088}
+	}
+	handle @runtimeStatus {
+		reverse_proxy {$LIVE_HLS_UPSTREAM:host.docker.internal:8088}
+	}
+	handle @hls {
+		reverse_proxy {$LIVE_HLS_UPSTREAM:host.docker.internal:8088}
+	}
+	handle {
+		respond "Not found" 404
+	}
+}

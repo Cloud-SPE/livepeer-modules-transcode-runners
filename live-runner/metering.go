@@ -122,29 +122,32 @@ func parseHLSMicrosecondsV1(raw string) (uint64, error) {
 }
 
 type LiveOutputMeterV1 struct {
-	store             *EncryptedFileSessionStoreV1
-	hls               *HLSHandlerV1
-	router            MediaPathReaderV1
-	pollInterval      time.Duration
-	heartbeatInterval time.Duration
-	requestTimeout    time.Duration
-	stallAfter        time.Duration
-	failAfter         time.Duration
-	now               func() time.Time
-	metrics           *LiveRunnerMetricsV1
+	store              *EncryptedFileSessionStoreV1
+	hls                *HLSHandlerV1
+	router             MediaPathReaderV1
+	pollInterval       time.Duration
+	heartbeatInterval  time.Duration
+	requestTimeout     time.Duration
+	stallAfter         time.Duration
+	failAfter          time.Duration
+	initialPublishWait time.Duration
+	reconnectGrace     time.Duration
+	now                func() time.Time
+	metrics            *LiveRunnerMetricsV1
 }
 
 func NewLiveOutputMeterV1(store *EncryptedFileSessionStoreV1, hls *HLSHandlerV1, router MediaPathReaderV1, pollInterval, heartbeatInterval, requestTimeout, stallAfter, failAfter time.Duration) (*LiveOutputMeterV1, error) {
 	if store == nil || hls == nil || router == nil || pollInterval <= 0 || heartbeatInterval <= 0 || requestTimeout <= 0 || pollInterval > heartbeatInterval || stallAfter <= 0 || failAfter <= stallAfter {
 		return nil, errors.New("live output meter dependencies are invalid")
 	}
-	return &LiveOutputMeterV1{store: store, hls: hls, router: router, pollInterval: pollInterval, heartbeatInterval: heartbeatInterval, requestTimeout: requestTimeout, stallAfter: stallAfter, failAfter: failAfter, now: time.Now, metrics: &LiveRunnerMetricsV1{}}, nil
+	return &LiveOutputMeterV1{store: store, hls: hls, router: router, pollInterval: pollInterval, heartbeatInterval: heartbeatInterval, requestTimeout: requestTimeout, stallAfter: stallAfter, failAfter: failAfter, initialPublishWait: 5 * time.Minute, reconnectGrace: 2 * time.Minute, now: time.Now, metrics: &LiveRunnerMetricsV1{}}, nil
 }
 
 // Run polls the one rendition named by the immutable session parameters. A
 // bad or unavailable playlist is non-billable input: the meter keeps liveness
 // heartbeats flowing and retries without changing the segment cursor.
 func (m *LiveOutputMeterV1) Run(ctx context.Context, record SessionRecordV1, secrets SessionSecretsV1) string {
+	defer m.hls.forgetSessionCookies(record.RunnerSessionID)
 	renderPath, err := RenditionMediaPathV1(record.RunnerSessionID, secrets.CreateRequest.SessionParams.MeteringRendition)
 	if err != nil {
 		return ""
@@ -154,7 +157,7 @@ func (m *LiveOutputMeterV1) Run(ctx context.Context, record SessionRecordV1, sec
 		return ""
 	}
 	if m.poll(ctx, record, ingestPath, renderPath) {
-		return "output_failed"
+		return m.closeReason(record.BrokerSessionID)
 	}
 	ticker := time.NewTicker(m.pollInterval)
 	defer ticker.Stop()
@@ -164,10 +167,18 @@ func (m *LiveOutputMeterV1) Run(ctx context.Context, record SessionRecordV1, sec
 			return ""
 		case <-ticker.C:
 			if m.poll(ctx, record, ingestPath, renderPath) {
-				return "output_failed"
+				return m.closeReason(record.BrokerSessionID)
 			}
 		}
 	}
+}
+
+func (m *LiveOutputMeterV1) closeReason(id string) string {
+	record, _, err := m.store.Load(id)
+	if err == nil && record.Stopping {
+		return record.PendingCloseReason
+	}
+	return "output_failed"
 }
 
 func (m *LiveOutputMeterV1) poll(ctx context.Context, record SessionRecordV1, ingestPath, renderPath string) bool {
@@ -177,6 +188,12 @@ func (m *LiveOutputMeterV1) poll(ctx context.Context, record SessionRecordV1, in
 	if statusErr == nil || errors.Is(statusErr, ErrMediaPathNotFoundV1) {
 		if err := m.store.RecordIngestPresence(record.BrokerSessionID, ingestOnline, now); errors.Is(err, ErrSessionTerminalV1) {
 			return false
+		}
+	}
+	if !ingestOnline && (statusErr == nil || errors.Is(statusErr, ErrMediaPathNotFoundV1)) {
+		expired, err := m.store.ExpireAbsentPublisher(record.BrokerSessionID, now, m.initialPublishWait, m.reconnectGrace)
+		if err == nil && expired {
+			return true
 		}
 	}
 	segments, err := m.finalizedSegments(ctx, record.RunnerSessionID, renderPath)

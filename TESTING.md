@@ -52,3 +52,13 @@ Live verifies actual RTMP publication, master/rendition/segment retrieval,
 positive cumulative output seconds, stream-key rotation/revocation, resumed
 output and idempotent termination with immediately unavailable playback.
 These CPU tests do not certify vendor hardware or a paid broker path.
+
+The live smoke also checks video/audio playlists and finalized segments for both
+renditions with an Origin header, reconnect after key rotation, never-published
+zero-usage expiry, and automatic disconnect expiry with a terminal callback. It
+uses shortened 15-second initial and 10-second reconnect deadlines for testing.
+
+`python3 infra/scripts/local-https-smoke.py` checks the bundled Caddy edge
+with an ephemeral local certificate: HLS, Range and LL-HLS query preservation,
+preflight, grant-protected runtime routes and private-route exclusion. It needs
+ports 18443, 18480 and 18488 free and does not validate production certificates.

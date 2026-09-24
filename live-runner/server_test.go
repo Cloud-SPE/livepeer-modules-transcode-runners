@@ -383,6 +383,15 @@ func TestLiveRunnerProductionMuxSeparatesStatusAndHLSHeadRoutes(t *testing.T) {
 	if len(routed) != 2 || routed[0] != (routedRequest{http.MethodGet, "runner_mux", "", ""}) || routed[1] != (routedRequest{http.MethodHead, "runner_mux", "720p", "index.m3u8"}) {
 		t.Fatalf("HLS routes=%+v", routed)
 	}
+	for _, path := range []string{"/v1/public/sessions/runner_mux/master.m3u8", "/v1/public/sessions/runner_mux/720p/index.m3u8"} {
+		if got := runnerRequestV1(t, handler, http.MethodOptions, path, nil, ""); got.Code != http.StatusNoContent {
+			t.Fatalf("HLS preflight route: %d", got.Code)
+		}
+	}
+	if got := runnerRequestV1(t, handler, http.MethodOptions, "/v1/sessions/runner_mux", nil, ""); got.Code == http.StatusNoContent {
+		t.Fatal("management inherited public preflight")
+	}
+
 }
 
 func testLiveRunnerHandlerV1(t *testing.T) (http.Handler, *EncryptedFileSessionStoreV1, *fakeLiveRuntimeV1) {
