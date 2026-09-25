@@ -1,4 +1,4 @@
-# Use a dedicated hostname whose DNS points to this host. Only public HLS is
+# Use a dedicated hostname whose DNS points to this host. Public HLS
 # and grant-authenticated runtime routes are exposed; broker management and
 # metrics stay private.
 {$LIVE_HLS_HOST:localhost} {

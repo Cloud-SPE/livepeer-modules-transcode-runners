@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -91,6 +92,16 @@ func LoadLiveRunnerConfigV1(getenv func(string) string) (LiveRunnerConfigV1, err
 	publicHTTP, err := required("LIVEPEER_PUBLIC_URL")
 	if err != nil {
 		return LiveRunnerConfigV1{}, err
+	}
+	requireHTTPS, err := strconv.ParseBool(valueOrV1(getenv("LIVE_RUNNER_REQUIRE_HTTPS"), "false"))
+	if err != nil {
+		return LiveRunnerConfigV1{}, errors.New("LIVE_RUNNER_REQUIRE_HTTPS must be a boolean")
+	}
+	if requireHTTPS {
+		origin, err := url.Parse(publicHTTP)
+		if err != nil || origin.Scheme != "https" || origin.Hostname() == "" || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" {
+			return LiveRunnerConfigV1{}, errors.New("LIVEPEER_PUBLIC_URL must be an HTTPS origin when LIVE_RUNNER_REQUIRE_HTTPS=true; configure a TLS proxy for HLS and grant-protected runtime routes")
+		}
 	}
 	presetsFile, err := required("LIVE_RUNNER_PRESETS_FILE")
 	if err != nil {

@@ -98,7 +98,8 @@ services:
       LIVEPEER_PUBLIC_RTMP_URL: ${LIVEPEER_PUBLIC_RTMP_URL:-rtmp://localhost:1935}
       LIVE_RUNNER_INITIAL_PUBLISH_TIMEOUT: ${LIVE_RUNNER_INITIAL_PUBLISH_TIMEOUT:-5m}
       LIVE_RUNNER_RECONNECT_GRACE: ${LIVE_RUNNER_RECONNECT_GRACE:-2m}
-      LIVEPEER_PUBLIC_URL: ${LIVEPEER_PUBLIC_URL:-http://localhost:8088}
+      LIVEPEER_PUBLIC_URL: ${LIVEPEER_PUBLIC_URL:-}
+      LIVE_RUNNER_REQUIRE_HTTPS: ${LIVE_RUNNER_REQUIRE_HTTPS:-true}
     volumes:
     - ../presets:/etc/runner/presets:ro
     - live_runner-state:/var/lib/live-runner

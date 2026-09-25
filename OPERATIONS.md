@@ -86,3 +86,19 @@ master, both video/audio rendition playlists, and segments from the portal
 origin. Verify disconnect/reconnect within grace, automatic ending beyond
 grace, and broker/gateway final settlement. Source tests cannot certify DNS,
 certificates, real GPU encoding or a paid deployment.
+
+## Production public-origin validation
+
+The NVIDIA production compose profile defaults `LIVE_RUNNER_REQUIRE_HTTPS=true`
+and requires an explicit `LIVEPEER_PUBLIC_URL`. Startup rejects an HTTP origin,
+a missing hostname, credentials, query, or fragment. Generic development profiles
+default the check to false for local HTTP smoke tests. This is configuration
+validation, not a TLS listener or a certificate/reachability check (`runners-0nw`).
+
+Before deploying the production profile, provision the TLS proxy described above
+and set a real public HTTPS origin. Keep the internal runner listener HTTP behind
+the proxy. Setting an `https` URL on the existing plain-HTTP port 18280 does not
+enable TLS. The proxy must forward public HLS and grant-protected stream-key/status
+routes while excluding management routes. Validate a fresh descriptor, playlist,
+segments, and key issuance from the gateway network. Existing HTTP-only production
+configuration now fails startup intentionally; configure the edge before rollout.

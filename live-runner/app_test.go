@@ -192,3 +192,32 @@ func TestResolveLiveHardwareCPUIsDeliberate(t *testing.T) {
 		t.Fatalf("CPU target did not disable hardware: got=%#v detected=%v err=%v", got, detected, err)
 	}
 }
+
+func TestProductionHTTPSOriginPolicy(t *testing.T) {
+	values := map[string]string{
+		"LIVE_RUNNER_MASTER_KEY":           base64.StdEncoding.EncodeToString([]byte(strings.Repeat("m", 32))),
+		"LIVE_RUNNER_INTERNAL_MEDIA_TOKEN": strings.Repeat("i", 32),
+		"LIVEPEER_PUBLIC_RTMP_URL":         "rtmp://runner.example:1935",
+		"LIVE_RUNNER_PRESETS_FILE":         "/etc/runner/presets/live.yaml",
+		"LIVE_RUNNER_REQUIRE_HTTPS":        "true",
+	}
+	for _, origin := range []string{"http://runner.example:18280", "https://", "https://user:password@runner.example", "https://runner.example?token=secret"} {
+		values["LIVEPEER_PUBLIC_URL"] = origin
+		if _, err := LoadLiveRunnerConfigV1(func(k string) string { return values[k] }); err == nil {
+			t.Fatalf("accepted insecure/invalid public origin %q", origin)
+		}
+	}
+	values["LIVEPEER_PUBLIC_URL"] = "https://runner.example/live"
+	if _, err := LoadLiveRunnerConfigV1(func(k string) string { return values[k] }); err != nil {
+		t.Fatal(err)
+	}
+	values["LIVE_RUNNER_REQUIRE_HTTPS"] = "false"
+	values["LIVEPEER_PUBLIC_URL"] = "http://localhost:8088"
+	if _, err := LoadLiveRunnerConfigV1(func(k string) string { return values[k] }); err != nil {
+		t.Fatal(err)
+	}
+	values["LIVE_RUNNER_REQUIRE_HTTPS"] = "not-a-boolean"
+	if _, err := LoadLiveRunnerConfigV1(func(k string) string { return values[k] }); err == nil {
+		t.Fatal("invalid HTTPS policy accepted")
+	}
+}
