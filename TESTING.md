@@ -10,6 +10,9 @@ The Docker Go gate runs race-enabled tests, vet, and builds for the root module.
 Tests cover strict contract decoding, terminal SSE claims, durable idempotency,
 ABR recovery, measured frames, encrypted live state, stream keys, callbacks,
 HLS routing, finalized-segment usage, process lifecycle and hardware policy.
+Live create recovery covers lost replies, authenticated reconciliation, durable
+fences across restart, concurrent create/fence ordering, waiting for runtime
+startup, corrupt state and delayed retries after capacity refusal.
 
 The tester connects directly to runners. `presets` and `contract` inspect
 read-only endpoints. `quick` requires `REQUEST_FILE` with a valid v2 request

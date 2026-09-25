@@ -120,6 +120,7 @@ func (s *LiveRunnerServerV1) Handler(mediaAuthorizer http.Handler) (http.Handler
 		return nil, errors.New("live runner server dependencies are incomplete")
 	}
 	mux := http.NewServeMux()
+	mux.Handle("POST /v1/session-creates/reconcile", s.brokerAuthV1(http.HandlerFunc(s.handleReconcileCreateV1)))
 	mux.Handle("POST /v1/sessions", s.brokerAuthV1(http.HandlerFunc(s.handleCreateV1)))
 	mux.Handle("GET /v1/sessions/{id}", s.brokerAuthV1(http.HandlerFunc(s.handleStatusV1)))
 	mux.HandleFunc("GET /v1/public/sessions/{id}/status", s.handleStatusV1)
@@ -153,6 +154,8 @@ func (s *LiveRunnerServerV1) handleCreateV1(writer http.ResponseWriter, request 
 		writeRunnerErrorV1(writer, http.StatusBadRequest, "invalid_request")
 		return
 	}
+	unlockCreate := s.lockSessionV1("create:" + create.SessionID)
+	defer unlockCreate()
 	if err := s.Runtime.ValidateSession(create); err != nil {
 		writeRunnerErrorV1(writer, http.StatusBadRequest, "invalid_session_params")
 		return
@@ -167,8 +170,8 @@ func (s *LiveRunnerServerV1) handleCreateV1(writer http.ResponseWriter, request 
 		writeRunnerErrorV1(writer, http.StatusConflict, ErrSessionIDReuseV1.Error())
 		return
 	}
-	if errors.Is(err, ErrSessionTerminalV1) {
-		writeRunnerErrorV1(writer, http.StatusGone, ErrSessionTerminalV1.Error())
+	if errors.Is(err, ErrSessionTerminalV1) || errors.Is(err, ErrCreateFencedV1) {
+		writeRunnerErrorV1(writer, http.StatusGone, err.Error())
 		return
 	}
 	if err != nil {
@@ -189,6 +192,16 @@ func (s *LiveRunnerServerV1) handleCreateV1(writer http.ResponseWriter, request 
 	secrets = *currentSecrets
 	if err := s.Runtime.EnsureSession(request.Context(), record, secrets); err != nil {
 		if errors.Is(err, transcode.ErrGPUAdmissionCapacity) {
+			// A definitive refusal must also prevent an exact delayed replay
+			// from starting after the broker releases its capacity slot.
+			stopping, _, stopErr := s.Store.BeginTermination(record.BrokerSessionID, "capacity_exhausted")
+			if stopErr == nil {
+				_, stopErr = CompleteLiveTerminationV1(context.WithoutCancel(request.Context()), s.Store, s.Runtime, stopping, s.nowV1())
+			}
+			if stopErr != nil {
+				writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "runtime_unavailable")
+				return
+			}
 			writeRunnerErrorV1(writer, http.StatusTooManyRequests, "capacity_reached")
 			return
 		}

@@ -29,6 +29,7 @@ with the same workload ID returns 409.
 
 | Method | Path | Authentication |
 |---|---|---|
+| POST | `/v1/session-creates/reconcile` | Member-agent tunnel, or configured broker bearer |
 | POST | `/v1/sessions` | Member-agent tunnel, or configured broker bearer |
 | GET, DELETE | `/v1/sessions/{id}` | Member-agent tunnel, or configured broker bearer |
 | POST | `/v1/sessions/{id}/stream-keys` | Returned `stream-key-issue` grant bearer |
@@ -47,3 +48,23 @@ rendition, not wall time or a sum across the ladder. Callback events have
 persistent IDs and sequences, use the per-session callback bearer, and retry
 from a durable outbox. Closing a session stops ingest and playback and erases
 its credentials once callback delivery is resolved.
+
+### Lost create response recovery
+
+The live contract advertises `paths.reconcile`. POST
+`{"session_id":"sess_broker_001"}` returns HTTP 200 with either:
+
+- `{"session_id":"sess_broker_001","outcome":"created","runner_session_id":"…"}`
+  for the original session, including terminal sessions. The broker must then
+  terminate that identity before releasing its slot.
+- `{"session_id":"sess_broker_001","outcome":"fenced"}` if no session exists.
+  This durably prevents any delayed create for that broker ID; create returns
+  410 `session_create_fenced` even after runner restart.
+
+The endpoint waits for any executing create to finish. Identical creates replay
+one durable identity/response; changed content returns 409. Terminal sessions
+cannot restart through create replay. A 429 `capacity_reached` refusal persists
+terminal state before replying. Inconclusive cleanup returns 503 instead.
+A timeout, plain 404, or invalid reply never establishes absence. Reconciliation
+returns no runtime credentials, grants or private descriptor. Fixtures are
+`live-runner/testdata/contracts/v1/create-reconcile-*.json`.

@@ -164,6 +164,11 @@ func (s *EncryptedFileSessionStoreV1) CreateOrReplay(request RunnerCreateRequest
 	if !errors.Is(err, os.ErrNotExist) {
 		return SessionRecordV1{}, SessionSecretsV1{}, false, err
 	}
+	if fenced, err := s.createFencedLocked(request.SessionID); err != nil {
+		return SessionRecordV1{}, SessionSecretsV1{}, false, err
+	} else if fenced {
+		return SessionRecordV1{}, SessionSecretsV1{}, false, ErrCreateFencedV1
+	}
 	grant := response.Runtime.Grants[0]
 	record = SessionRecordV1{
 		Version: sessionRecordVersionV1, BrokerSessionID: request.SessionID,

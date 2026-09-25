@@ -206,6 +206,7 @@ type RunnerReadinessV1 struct {
 	Path string `json:"path"`
 }
 type RunnerPathsV1 struct {
+	Reconcile string `json:"reconcile"`
 	Create    string `json:"create"`
 	Status    string `json:"status"`
 	Terminate string `json:"terminate"`
@@ -452,7 +453,7 @@ func LiveRunnerContractV1() LiveRunnerContractDocumentV1 {
 		DescriptorSchemas: []string{RuntimeSchemaV1}, Metering: "runner-reported",
 		WorkUnit: RunnerWorkUnitV1{Name: WorkUnitV1}, Heartbeat: HeartbeatV1{IntervalSeconds: 5},
 		Readiness:           RunnerReadinessV1{Type: "http-status", Path: "/ready"},
-		Paths:               RunnerPathsV1{Create: "/v1/sessions", Status: "/v1/sessions/{id}", Terminate: "/v1/sessions/{id}"},
+		Paths:               RunnerPathsV1{Reconcile: "/v1/session-creates/reconcile", Create: "/v1/sessions", Status: "/v1/sessions/{id}", Terminate: "/v1/sessions/{id}"},
 		Identity:            map[string]string{"provider": "livepeer-live-runner"},
 		SchemaVersions:      map[string]string{PaidSessionProtocolV1: PaidSessionVersionV1, RuntimeSchemaV1: RuntimeSchemaVersionV1, SessionParamsSchemaV1: SessionParamsVersionV1},
 		SessionParamsSchema: json.RawMessage(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"required":["schema","publisher_mode","output_profile","metering_rendition","storage"],"properties":{"schema":{"const":"rtmp-hls-session/v1"},"publisher_mode":{"enum":["gateway-relay","direct-publisher"]},"output_profile":{"type":"string"},"metering_rendition":{"type":"string"},"storage":{"type":"object"}}}`),
@@ -463,7 +464,7 @@ func ValidateRunnerContractV1(value LiveRunnerContractDocumentV1) error {
 	if value.CapabilityID != "video:transcode.live" || value.Protocol != PaidSessionProtocolV1 || len(value.DescriptorSchemas) != 1 || value.DescriptorSchemas[0] != RuntimeSchemaV1 || value.WorkUnit.Name != WorkUnitV1 || value.Metering != "runner-reported" || value.Heartbeat.IntervalSeconds == 0 {
 		return errors.New("runner capability contract is invalid")
 	}
-	if value.Readiness.Type != "http-status" || value.Readiness.Path != "/ready" || value.Paths.Create != "/v1/sessions" || !strings.Contains(value.Paths.Status, "{id}") || !strings.Contains(value.Paths.Terminate, "{id}") || !json.Valid(value.SessionParamsSchema) {
+	if value.Readiness.Type != "http-status" || value.Readiness.Path != "/ready" || value.Paths.Create != "/v1/sessions" || value.Paths.Reconcile != "/v1/session-creates/reconcile" || !strings.Contains(value.Paths.Status, "{id}") || !strings.Contains(value.Paths.Terminate, "{id}") || !json.Valid(value.SessionParamsSchema) {
 		return errors.New("runner paths or parameter schema is invalid")
 	}
 	if value.Identity["provider"] == "" || value.SchemaVersions[PaidSessionProtocolV1] != PaidSessionVersionV1 || value.SchemaVersions[RuntimeSchemaV1] != RuntimeSchemaVersionV1 || value.SchemaVersions[SessionParamsSchemaV1] != SessionParamsVersionV1 {

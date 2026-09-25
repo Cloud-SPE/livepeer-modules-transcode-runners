@@ -102,3 +102,17 @@ enable TLS. The proxy must forward public HLS and grant-protected stream-key/sta
 routes while excluding management routes. Validate a fresh descriptor, playlist,
 segments, and key issuance from the gateway network. Existing HTTP-only production
 configuration now fails startup intentionally; configure the edge before rollout.
+
+## Recovering a lost live create response
+
+Upgrade the Modules broker to support optional `paths.reconcile` before attaching
+this runner release. The broker calls the runner over its existing private
+authenticated path using the original broker session ID. Recovery identifies
+and terminates created work, or fences absent work before releasing a slot.
+No request replay should be used to discover whether uncertain work exists.
+
+Keep the live state volume and sealing key intact. Alongside session JSON files,
+`*.create-fence` files are permanent integrity-protected create exclusions and
+must not be pruned. An invalid fence fails closed. Do not delete state or change
+keys to recover apparent capacity; doing so removes the delayed-create guard.
+Receiver accounting and broker-signed settlement remain the broker's obligation.
