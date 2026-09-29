@@ -107,7 +107,11 @@ func (h *HLSHandlerV1) serveMaster(writer http.ResponseWriter, request *http.Req
 			continue
 		}
 		renderPath, err := RenditionMediaPathV1(runnerID, rendition.Name)
-		if err != nil || !h.hasFinalizedSegment(request.Context(), runnerID, renderPath) {
+		if err != nil {
+			continue
+		}
+		variant, err := h.publicVariant(request.Context(), runnerID, renderPath, rendition.Name)
+		if err != nil {
 			continue
 		}
 		videoBandwidth, videoErr := bitrateBitsV1(rendition.Video.MaxBitrate)
@@ -117,7 +121,8 @@ func (h *HLSHandlerV1) serveMaster(writer http.ResponseWriter, request *http.Req
 			writeRunnerErrorV1(writer, http.StatusServiceUnavailable, "profile_unavailable")
 			return
 		}
-		fmt.Fprintf(&body, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s,mp4a.40.2\"\n%s/index.m3u8\n", videoBandwidth+audioBandwidth, rendition.Video.Width, rendition.Video.Height, codec, rendition.Name)
+		body.WriteString(variant.audioLines)
+		fmt.Fprintf(&body, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"%s,mp4a.40.2\"%s\n%s/%s\n", videoBandwidth+audioBandwidth, rendition.Video.Width, rendition.Video.Height, codec, variant.audioRef, rendition.Name, variant.videoURI)
 		playable++
 	}
 	if playable == 0 {
@@ -130,25 +135,6 @@ func (h *HLSHandlerV1) serveMaster(writer http.ResponseWriter, request *http.Req
 	if request.Method == http.MethodGet {
 		_, _ = io.WriteString(writer, body.String())
 	}
-}
-
-func (h *HLSHandlerV1) hasFinalizedSegment(ctx context.Context, runnerID, renderPath string) bool {
-	ctx, cancel := context.WithTimeout(ctx, h.timeout)
-	defer cancel()
-	master, err := h.fetchPlaylist(ctx, runnerID, renderPath+"/index.m3u8")
-	if err != nil {
-		return false
-	}
-	mediaURI, err := mediaPlaylistURIV1(master)
-	if err != nil {
-		return false
-	}
-	media, err := h.fetchPlaylist(ctx, runnerID, renderPath+"/"+mediaURI)
-	if err != nil {
-		return false
-	}
-	segments, err := ParseFinalizedHLSSegmentsV1(strings.NewReader(media))
-	return err == nil && len(segments) > 0
 }
 
 func (h *HLSHandlerV1) fetchPlaylist(ctx context.Context, runnerID, mediaPath string) (string, error) {

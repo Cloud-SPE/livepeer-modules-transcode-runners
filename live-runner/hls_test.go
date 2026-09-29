@@ -25,7 +25,16 @@ func TestLiveHLSRealMediaMTXPlaylistIsPubliclyReachable(t *testing.T) {
 	}
 	for _, binary := range []string{"docker", "ffmpeg"} {
 		if _, err := exec.LookPath(binary); err != nil {
-			t.Skip(binary + " is not installed")
+			t.Fatal(binary + " is required when LIVE_RUNNER_CONTAINER_TEST=1")
+		}
+	}
+	// Pull before the readiness deadline; a first-run image download is not a
+	// MediaMTX startup failure and must not leave a late-starting container.
+	pullCtx, cancelPull := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelPull()
+	if err := exec.CommandContext(pullCtx, "docker", "image", "inspect", MediaMTXImageV1).Run(); err != nil {
+		if output, err := exec.CommandContext(pullCtx, "docker", "pull", MediaMTXImageV1).CombinedOutput(); err != nil {
+			t.Fatalf("prepare MediaMTX image: %v: %s", err, output)
 		}
 	}
 	store, request, response, _ := mediaTestSessionV1(t)
@@ -66,7 +75,7 @@ func TestLiveHLSRealMediaMTXPlaylistIsPubliclyReachable(t *testing.T) {
 	if err := os.WriteFile(configPath, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	containerName := fmt.Sprintf("live-runner-hls-real-%d", os.Getpid())
+	containerName := fmt.Sprintf("live-runner-hls-real-%d-%d", os.Getpid(), time.Now().UnixNano())
 	cleanupRouter := func() { _ = exec.Command("docker", "rm", "-f", containerName).Run() }
 	cleanupRouter()
 	defer cleanupRouter()
@@ -134,8 +143,19 @@ func TestLiveHLSRealMediaMTXPlaylistIsPubliclyReachable(t *testing.T) {
 		t.Fatalf("real LL-HLS parts=%d %q auth=%v", parts.Code, parts.Body.String(), safeAuth)
 	}
 	master := hlsRequestV1(t, handler, response.RunnerSessionID, "master.m3u8", "")
-	if master.Code != http.StatusOK || !strings.Contains(master.Body.String(), "720p/index.m3u8") {
+	if master.Code != http.StatusOK || !strings.Contains(master.Body.String(), "720p/video1_stream.m3u8") {
 		t.Fatalf("real HLS master=%d %q", master.Code, master.Body.String())
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /v1/public/sessions/{id}/{asset}", handler)
+	mux.Handle("GET /v1/public/sessions/{id}/{rendition}/{asset}", handler)
+	public := httptest.NewServer(mux)
+	defer public.Close()
+	decodeCtx, cancelDecode := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancelDecode()
+	decoder := exec.CommandContext(decodeCtx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", public.URL+"/v1/public/sessions/"+response.RunnerSessionID+"/master.m3u8", "-t", "2", "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-")
+	if output, err := decoder.CombinedOutput(); err != nil {
+		t.Fatalf("public master failed video/audio decode: %v: %s", err, output)
 	}
 	ready := make(chan struct{})
 	close(ready)
@@ -196,7 +216,7 @@ func TestHLSHandlerServesMasterAndStrictRenditionAssets(t *testing.T) {
 	}
 
 	master := hlsRequestV1(t, handler, record.RunnerSessionID, "master.m3u8", "")
-	if master.Code != http.StatusOK || master.Header().Get("Cache-Control") != "no-store" || !strings.Contains(master.Body.String(), "BANDWIDTH=3846000,RESOLUTION=1280x720,CODECS=\"avc1.64001f,mp4a.40.2\"") || !strings.Contains(master.Body.String(), "720p/index.m3u8") {
+	if master.Code != http.StatusOK || master.Header().Get("Cache-Control") != "no-store" || !strings.Contains(master.Body.String(), "BANDWIDTH=3846000,RESOLUTION=1280x720,CODECS=\"avc1.64001f,mp4a.40.2\"") || !strings.Contains(master.Body.String(), "720p/video1_stream.m3u8") {
 		t.Fatalf("master=%d headers=%v body=%q", master.Code, master.Header(), master.Body.String())
 	}
 
@@ -277,7 +297,7 @@ func TestHLSMasterListsOnlyPlayableRenditionsAndReturnsUnavailable(t *testing.T)
 		t.Fatal(err)
 	}
 	master := hlsRequestV1(t, handler, record.RunnerSessionID, "master.m3u8", "")
-	if master.Code != http.StatusOK || !strings.Contains(master.Body.String(), "720p/index.m3u8") || strings.Contains(master.Body.String(), "360p/index.m3u8") {
+	if master.Code != http.StatusOK || !strings.Contains(master.Body.String(), "720p/video.m3u8") || strings.Contains(master.Body.String(), "360p/") {
 		t.Fatalf("filtered master=%d %q", master.Code, master.Body.String())
 	}
 	playable.Store(false)

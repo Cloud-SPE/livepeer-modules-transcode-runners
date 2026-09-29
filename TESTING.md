@@ -65,3 +65,14 @@ uses shortened 15-second initial and 10-second reconnect deadlines for testing.
 with an ephemeral local certificate: HLS, Range and LL-HLS query preservation,
 preflight, grant-protected runtime routes and private-route exclusion. It needs
 ports 18443, 18480 and 18488 free and does not validate production certificates.
+
+The public HLS master points directly to rendition media playlists and keeps
+separate, uniquely named audio groups. `TestFlattenMediaMTXAudioGroups` covers
+multiple renditions, quoted metadata and unsafe child URIs. The opt-in
+`TestLiveHLSRealMediaMTXPlaylistIsPubliclyReachable` additionally decodes both
+video and audio from the public root using FFmpeg. Set
+`LIVE_RUNNER_CONTAINER_TEST=1` in a test environment with Docker CLI/daemon
+access and FFmpeg; it fails if those tools are missing. When running the Go
+test inside Docker, share host networking, the daemon socket, and `/tmp` so the
+nested MediaMTX container can read the generated configuration. The ordinary
+Docker gate retains the deterministic tests without requiring nested Docker.

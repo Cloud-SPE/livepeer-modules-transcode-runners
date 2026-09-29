@@ -75,20 +75,17 @@ try:
                 continue
             if len(variants) < 2:
                 continue
-            for variant in variants:
-                varianturl = urljoin(coords['hls_url'], variant)
-                playlist = request(varianturl).decode()
-                media = [l for l in playlist.splitlines() if l and not l.startswith('#')]
-                media += re.findall(r'URI="([^"\n]+\.m3u8)"', playlist)
-                assert media, 'no media playlists'
-                for uri in media:
-                    mediaurl = urljoin(varianturl, uri)
-                    media_playlist = request(mediaurl).decode()
-                    segments = [l for l in media_playlist.splitlines() if l and not l.startswith('#')]
-                    if not segments:
-                        raise TimeoutError('waiting for finalized segments')
-                    segment = request(urljoin(mediaurl, segments[-1]))
-                    assert len(segment) > 0
+            audio = re.findall(r'URI="([^"\n]+\.m3u8)"', master)
+            assert audio, 'public master lost audio groups'
+            for uri in variants + audio:
+                mediaurl = urljoin(coords['hls_url'], uri)
+                media_playlist = request(mediaurl).decode()
+                assert '#EXT-X-STREAM-INF:' not in media_playlist, 'nested master playlist'
+                segments = [l for l in media_playlist.splitlines() if l and not l.startswith('#')]
+                if not segments:
+                    raise TimeoutError('waiting for finalized segments')
+                segment = request(urljoin(mediaurl, segments[-1]))
+                assert len(segment) > 0
             playable = True
             print('HLS master + rendition + finalized media segment fetched:', len(segment), 'bytes')
             break
